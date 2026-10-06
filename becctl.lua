@@ -1,6 +1,10 @@
 local shell = require("shell")
-local programPath = shell.getRunningProgram()
-local programDirectory = programPath:match("^(.*[/\\])") or "./"
+local filesystem = require("filesystem")
+local programPath, resolveError = shell.resolve("becctl", "lua")
+if not programPath then
+  error("Unable to resolve becctl.lua: " .. tostring(resolveError))
+end
+local programDirectory = filesystem.path(programPath)
 package.path = programDirectory .. "?.lua;"
   .. programDirectory .. "?/init.lua;"
   .. package.path
