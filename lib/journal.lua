@@ -4,9 +4,10 @@ journal.__index = journal
 function journal.new(path)
   local serialization = require("serialization")
   local filesystem = require("filesystem")
+  local shell = require("shell")
 
   return setmetatable({
-    path = path,
+    path = shell.resolve(path),
     serialization = serialization,
     filesystem = filesystem,
   }, journal)

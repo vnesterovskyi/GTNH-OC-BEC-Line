@@ -1,6 +1,7 @@
 local component = require("component")
 local filesystem = require("filesystem")
 local internet = require("internet")
+local shell = require("shell")
 
 local repository = "vnesterovskyi/GTNH-OC-BEC-Line"
 local revision = "main"
@@ -44,8 +45,9 @@ local function download(path)
     chunks[#chunks + 1] = chunk
   end
 
-  ensureParent(path)
-  local temporaryPath = path .. ".tmp"
+  local destinationPath = shell.resolve(path)
+  ensureParent(destinationPath)
+  local temporaryPath = destinationPath .. ".tmp"
   local file, openError = io.open(temporaryPath, "wb")
   if not file then
     error("Unable to write " .. temporaryPath .. ": " .. tostring(openError))
@@ -53,15 +55,15 @@ local function download(path)
   file:write(table.concat(chunks))
   file:close()
 
-  if filesystem.exists(path) then
-    local removed, removeError = filesystem.remove(path)
+  if filesystem.exists(destinationPath) then
+    local removed, removeError = filesystem.remove(destinationPath)
     if not removed then
       error("Unable to replace " .. path .. ": " .. tostring(removeError))
     end
   end
 
-  local _, renameError = filesystem.rename(temporaryPath, path)
-  if not filesystem.exists(path) or filesystem.exists(temporaryPath) then
+  local _, renameError = filesystem.rename(temporaryPath, destinationPath)
+  if not filesystem.exists(destinationPath) or filesystem.exists(temporaryPath) then
     error("Unable to publish " .. path .. ": " .. tostring(renameError))
   end
   print("ok")
@@ -71,15 +73,17 @@ for _, path in ipairs(files) do
   download(path)
 end
 
-if not filesystem.exists("config.lua") then
-  local source, sourceError = io.open("config.example.lua", "rb")
+local configPath = shell.resolve("config.lua")
+local exampleConfigPath = shell.resolve("config.example.lua")
+if not filesystem.exists(configPath) then
+  local source, sourceError = io.open(exampleConfigPath, "rb")
   if not source then
     error("Unable to open config.example.lua: " .. tostring(sourceError))
   end
   local content = source:read("*a")
   source:close()
 
-  local target, targetError = io.open("config.lua", "wb")
+  local target, targetError = io.open(configPath, "wb")
   if not target then
     error("Unable to create config.lua: " .. tostring(targetError))
   end
