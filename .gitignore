@@ -1,0 +1,4 @@
+config.lua
+*.log
+*.state
+
