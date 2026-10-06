@@ -48,8 +48,8 @@ function journal:save(data)
     end
   end
 
-  local renamed, renameError = self.filesystem.rename(temporaryPath, self.path)
-  if not renamed then
+  local _, renameError = self.filesystem.rename(temporaryPath, self.path)
+  if not self.filesystem.exists(self.path) or self.filesystem.exists(temporaryPath) then
     error("Unable to publish journal: " .. tostring(renameError))
   end
 end

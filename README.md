@@ -70,8 +70,8 @@ transition. The configured redstone `pausedOutput` must arm/pause it, while
 After this repository is published, install or update from OpenOS with:
 
 ```sh
-wget -f https://raw.githubusercontent.com/vnesterovskyi/GTNH-OC-BEC-Line/main/install.lua
-install
+wget -f https://raw.githubusercontent.com/vnesterovskyi/GTNH-OC-BEC-Line/main/becinstall.lua
+becinstall
 ```
 
 The installer updates program files atomically and preserves an existing

@@ -60,8 +60,8 @@ local function download(path)
     end
   end
 
-  local renamed, renameError = filesystem.rename(temporaryPath, path)
-  if not renamed then
+  local _, renameError = filesystem.rename(temporaryPath, path)
+  if not filesystem.exists(path) or filesystem.exists(temporaryPath) then
     error("Unable to publish " .. path .. ": " .. tostring(renameError))
   end
   print("ok")
@@ -91,4 +91,3 @@ else
 end
 
 print("Installation complete. Run: becctl selftest")
-
