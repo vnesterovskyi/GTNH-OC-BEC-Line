@@ -24,8 +24,8 @@ function simulator.build(options)
   local paused = true
   local filters = {}
   local naniteStack = nil
-  local bufferStack = nil
   local providedTier = nil
+  local loadedTier = nil
   local stepIndex = 1
   local steps = options.steps or {1, 2, 1}
   local state = options.state or "paused-step"
@@ -103,26 +103,40 @@ function simulator.build(options)
     filters = {}
   end
 
-  local bridge = {}
-  function bridge:targetStack() return naniteStack and util.copy(naniteStack) or nil end
-  function bridge:bufferStack() return bufferStack and util.copy(bufferStack) or nil end
-
   local nanites = {}
+  function nanites:setLoadedTier(tier)
+    loadedTier = tier
+  end
+  function nanites:hasActiveCell()
+    return naniteStack ~= nil
+  end
   function nanites:load(tier, count)
+    if naniteStack ~= nil then
+      self:unload(loadedTier)
+    end
     naniteStack = {name = "sim:nanite", damage = tier, label = "Tier " .. tier .. " Nanites", size = count}
     providedTier = tier
+    loadedTier = tier
   end
   function nanites:unload()
     naniteStack = nil
     providedTier = nil
+    loadedTier = nil
   end
   function nanites:status()
+    local tiers = {}
+    for tier = 1, 10 do
+      tiers[tier] = {
+        slot = tier,
+        state = loadedTier == tier and "empty" or "home",
+      }
+    end
     return {
-      target = bridge:targetStack(),
-      buffer = bridge:bufferStack(),
+      tiers = tiers,
       available = ioNode.getAvailableNanites(),
       providedTier = ioNode.getProvidedTier(),
       requiredTier = ioNode.getRequiredTier(),
+      loadedTier = loadedTier,
     }
   end
 
@@ -166,7 +180,6 @@ function simulator.build(options)
     environment = environment,
     io = ioNode,
     gate = gate,
-    bridge = bridge,
     nanites = nanites,
     pause = pause,
     lock = lock,
@@ -183,6 +196,7 @@ function simulator.build(options)
       filters = util.copy(filters),
       naniteStack = util.copy(naniteStack),
       providedTier = providedTier,
+      loadedTier = loadedTier,
       stepIndex = stepIndex,
     }
   end

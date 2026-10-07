@@ -33,6 +33,7 @@ function controller.new(hardware, config, options)
     log = options.log or print,
     state = "NEW",
     observedActive = false,
+    currentNaniteTier = nil,
   }, controller)
 end
 
@@ -44,6 +45,7 @@ function controller:setState(state, detail)
       state = state,
       detail = detail,
       observedActive = self.observedActive,
+      currentNaniteTier = self.currentNaniteTier,
       timestamp = self.environment.now(),
     })
   end
@@ -70,6 +72,12 @@ function controller:failClosed(reason)
   local pauseOk, pauseError = pcall(function()
     self.hardware.pause:setPaused(true)
   end)
+  local statusOk, naniteStatus = pcall(function()
+    return self.hardware.nanites:status()
+  end)
+  if statusOk and naniteStatus.loadedTier ~= nil then
+    self.currentNaniteTier = naniteStatus.loadedTier
+  end
 
   local detail = tostring(reason)
   if not pauseOk then
@@ -83,6 +91,7 @@ function controller:failClosed(reason)
         state = "FAULT",
         detail = detail,
         observedActive = self.observedActive,
+        currentNaniteTier = self.currentNaniteTier,
         timestamp = self.environment.now(),
       })
     end)
@@ -95,6 +104,8 @@ end
 
 function controller:reconcile()
   local previousJournal = self.journal and self.journal:load() or nil
+  self.currentNaniteTier = previousJournal and previousJournal.currentNaniteTier or nil
+  self.hardware.nanites:setLoadedTier(self.currentNaniteTier)
   self:setState("RECONCILING")
   self:pause()
 
@@ -122,9 +133,10 @@ function controller:reconcile()
   end
 
   if lockCount == 0 and state == "idle" then
-    if self.hardware.bridge:targetStack() ~= nil or self.hardware.bridge:bufferStack() ~= nil then
-      self:mutation("return residual nanites/items to the warehouse", function()
-        self.hardware.nanites:unload()
+    if self.hardware.nanites:hasActiveCell() then
+      self:mutation("return the residual nanite cell to its chest slot", function()
+        self.hardware.nanites:unload(self.currentNaniteTier)
+        self.currentNaniteTier = nil
       end)
     end
     if #self.hardware.gate:names() > 0 then
@@ -194,6 +206,8 @@ function controller:configureRecipe(recipe)
         self.config.cycle.naniteCount,
         true
       )
+      self.currentNaniteTier = recipe.tier.tier
+      self:setState("NANITE_READY", "tier " .. recipe.tier.tier .. " loaded")
     end
   )
 end
@@ -209,6 +223,8 @@ function controller:swapNanites(requiredTier)
         self.config.cycle.naniteCount,
         true
       )
+      self.currentNaniteTier = requiredTier.tier
+      self:setState("SWAPPING", "tier " .. requiredTier.tier .. " loaded")
     end
   )
 end
@@ -264,11 +280,11 @@ function controller:runRecipe(initialTier)
       end
 
       local status = self.hardware.nanites:status()
-      local loadedCount = status.target and (status.target.size or 0) or 0
+      local loadedCount = status.available or 0
       local providedTier = status.providedTier and status.providedTier.tier or nil
       if requiredTier.tier ~= currentTier
           or providedTier ~= requiredTier.tier
-          or loadedCount ~= self.config.cycle.naniteCount then
+          or loadedCount < self.config.cycle.naniteCount then
         self:swapNanites(requiredTier)
         currentTier = requiredTier.tier
       end
@@ -288,8 +304,9 @@ function controller:cleanup()
   self:pause()
 
   self:setState("CLEANING", "returning nanites")
-  self:mutation("return all nanites to the warehouse", function()
-    self.hardware.nanites:unload()
+  self:mutation("return the active nanite cell to its chest slot", function()
+    self.hardware.nanites:unload(self.currentNaniteTier)
+    self.currentNaniteTier = nil
   end)
 
   self:mutation("clear Maxwell Gate filters", function()

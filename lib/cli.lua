@@ -10,10 +10,9 @@ Usage:
   becctl [--config=path] probe
   becctl [--config=path] status
   becctl [--config=path] selftest
-  becctl [--config=path] bench transfer [count]
   becctl [--config=path] lock status|acquire|release [--force]
   becctl [--config=path] gate show|set <fluid...>|clear [--force]
-  becctl [--config=path] nanite status|load <tier> [count]|unload
+  becctl [--config=path] nanite status|load <tier> [minimum]|unload <tier>
   becctl [--config=path] cycle --simulate|--step|--automatic
 ]])
 end
@@ -57,11 +56,11 @@ local function probe(config)
     print("  " .. descriptor.name .. " = " .. descriptor.type .. "@" .. descriptor.address)
   end
 
-  print("\nConfigured nanite identities:")
+  print("\nNanite cell chest:")
+  local status = hardware.nanites:status()
   for tier = 1, 10 do
-    local configured = config.nanites[tier]
-    local stack = hardware.bridge:warehouseStack(configured)
-    print("  T" .. tier .. ": " .. (stack and util.describe(stack) or "NOT FOUND"))
+    local cell = status.tiers[tier]
+    print("  T" .. tier .. " slot " .. tostring(cell.slot) .. ": " .. cell.state)
   end
 end
 
@@ -76,25 +75,8 @@ local function status(config)
   printMap("Gate filters", hardware.gate:get())
   printMap("Storage", hardware.storage:status())
   print("Lock count: " .. hardware.lock:count())
-  printMap("Nanite bridge", hardware.nanites:status())
+  printMap("Nanite carousel", hardware.nanites:status())
   print("Pause asserted: " .. tostring(hardware.pause:isPaused()))
-end
-
-local function runBench(config, args)
-  if args[2] ~= "transfer" then
-    error("Expected: bench transfer [count]")
-  end
-  local hardware = hardwareFactory.build(config)
-  local count = tonumber(args[3]) or config.commissioning.testCount
-  util.requirePositiveInteger(count, "Bench count")
-
-  if hardware.bridge:targetStack() ~= nil then
-    error("Bench target must be empty before testing")
-  end
-  hardware.bridge:load(config.commissioning.testItem, count)
-  print("Forward transfer verified: " .. util.describe(hardware.bridge:targetStack()))
-  hardware.bridge:unload()
-  print("Reverse transfer verified; target and buffer are empty")
 end
 
 local function runLock(config, args)
@@ -145,7 +127,7 @@ local function runNanite(config, args)
   local hardware = hardwareFactory.build(config)
   local action = args[2]
   if action == "status" then
-    printMap("Nanite bridge", hardware.nanites:status())
+    printMap("Nanite carousel", hardware.nanites:status())
   elseif action == "load" then
     local state = hardware.io.getState()
     if state == "crafting" then
@@ -156,13 +138,16 @@ local function runNanite(config, args)
     if tier > 10 then error("Nanite tier must be between 1 and 10") end
     local count = tonumber(args[4]) or config.cycle.naniteCount
     hardware.nanites:load(tier, count, false)
-    printMap("Nanite bridge", hardware.nanites:status())
+    printMap("Nanite carousel", hardware.nanites:status())
   elseif action == "unload" then
     hardware.pause:setPaused(true)
-    hardware.nanites:unload()
-    print("Nanites returned to warehouse")
+    local tier = util.requirePositiveInteger(tonumber(args[3]), "Nanite tier")
+    if tier > 10 then error("Nanite tier must be between 1 and 10") end
+    hardware.nanites:setLoadedTier(tier)
+    hardware.nanites:unload(tier)
+    print("Tier-" .. tier .. " cell returned home")
   else
-    error("Expected: nanite status|load|unload")
+    error("Expected: nanite status|load <tier> [minimum]|unload <tier>")
   end
 end
 
@@ -204,8 +189,6 @@ function cli.run(config, args)
   elseif command == "selftest" then
     local simulator = require("lib.simulator")
     simulator.runSelfTests(controllerClass, config)
-  elseif command == "bench" then
-    runBench(config, args)
   elseif command == "lock" then
     runLock(config, args)
   elseif command == "gate" then

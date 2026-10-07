@@ -8,76 +8,111 @@ The controller coordinates:
 - a shared Containment Field behind a dynamically filtered Maxwell Gate;
 - an AE2 blocking subnetwork containing exactly one cobblestone lock item;
 - an Observation Array and one IO Node;
-- a nanite warehouse connected through programmable AE2 buses, a one-slot
-  transfer buffer, and an OpenComputers Transposer;
-- a Teleportation Node Controller Hatch configured to pause at nanite-step
-  transitions.
+- ten filtered nanite storage cells selected by chest slot;
+- a Transposer between the cell chest and two accelerated ME IO Ports;
+- a Teleportation Node Controller Hatch configured to pause at nanite steps.
 
 This project targets the OpenComputers integration at commit
 `1e4559ff5f2443695cb28c7cdc9fba87219a862b`.
 
 ## Safety model
 
-The script asserts the IO pause signal before mutating routing or inventory.
-It never releases the AE2 lock until the IO Node has completed, nanites have
-returned to storage, and Maxwell Gate filters have cleared.
+The IO Node remains paused while condensate routing or nanite cells change.
+The lock is released only after the recipe completes, the active cell returns
+home, and Maxwell Gate filters clear.
 
-Any component error, timeout, unexpected machine state, ambiguous component
-address, transfer shortfall, or failed postcondition enters a fail-closed
-state:
-
-- the pause signal remains asserted;
-- the lock item remains present;
-- active-recipe Gate filters are preserved;
-- the failure is written to the journal and surfaced to the operator.
+Any timeout, missing cell, transfer failure, unexpected machine state, or
+failed postcondition leaves the IO Node paused and the lock present.
 
 The script does not control Containment Field power. The field must remain
-powered independently; power loss or disabling the field voids its contents.
+powered independently.
 
 ## Physical topology
 
 ```text
-Main AE2 network
-  |
-  +-- blocking interface --> BEC item subnetwork
-                              +-- dedicated lock chest (one cobblestone)
-                              +-- IO Node input/output
-
-Nanite warehouse AE2
-  +-- programmable export bus --+
-  +-- programmable import bus --+--> one-slot buffer
-                                      |
-                                  Transposer
-                                      |
-                              nanite containment bus
-
-Containment Field --> Maxwell Gate --> Observation Array --> IO Node
-
-OC redstone output 1 --> Teleportation Node Controller Hatch
-OC redstone output 2 --> lock-item importer/trash mechanism
+Cell chest (slots 1-10)
+            |
+        Transposer
+       /          \
+cell -> network   network -> cell
+    ME IO Port    ME IO Port
+        \          /
+        nanite AE subnet
+               |
+      ME Storage Bus facing
+      Nanite Containment Bus
+      in Observation Array
 ```
 
-The import and export buses must face the one-slot buffer. The Transposer
-must see both the buffer and the nanite containment bus. During commissioning,
-replace the nanite bus with an ordinary empty chest.
+The tested Transposer orientation is:
 
-Configure the Teleportation Node Controller Hatch to pause on a step
-transition. The configured redstone `pausedOutput` must arm/pause it, while
-`runningOutput` must release it.
+- east (`5`): cell chest;
+- north (`2`): cell-to-network IO Port;
+- south (`3`): network-to-cell IO Port.
+
+Both IO Ports should contain acceleration cards.
+
+Chest slots map directly to nanite tiers:
+
+| Slot | Tier | Nanite |
+|---:|---:|---|
+| 1 | 1 | Carbon or Glowstone |
+| 2 | 2 | Silver |
+| 3 | 3 | Gold |
+| 4 | 4 | Transcendent Metal |
+| 5 | 5 | Six-Phased Copper |
+| 6 | 6 | White Dwarf Matter |
+| 7 | 7 | Black Dwarf Matter |
+| 8 | 8 | Universium |
+| 9 | 9 | Eternity |
+| 10 | 10 | Magmatter |
+
+Empty chest slots are allowed. A cycle fails closed only if its requested tier
+is missing. Adding a tier later requires placing its filtered cell into the
+already configured slot; no code patch is required.
+
+## Nanite counts
+
+GTNH 2.9 beta-3:
+
+```lua
+naniteCount = 2048
+```
+
+RC-1 and later:
+
+```lua
+naniteCount = 30720
+```
+
+The value is a minimum. Cells may contain more; loading succeeds when the IO
+Node reports at least the configured count. Unloading always waits for exactly
+zero.
+
+## Other required connections
+
+- Adapter touching the IO Node controller (`bec_io_node`).
+- Adapter touching the Maxwell Gate controller (`bec_diode`).
+- Adapter touching the Containment Field controller (`bec_storage`).
+- Adapter touching an ME Interface on the lock/staging network.
+- Redstone component with separate outputs for:
+  - Teleportation Node Controller Hatch;
+  - cobblestone lock removal.
+- Transposer connected directly to the OC network.
+
+Configure the Teleportation Node Controller Hatch to pause on nanite-step
+transitions.
 
 ## Installation
-
-After this repository is published, install or update from OpenOS with:
 
 ```sh
 wget -f https://raw.githubusercontent.com/vnesterovskyi/GTNH-OC-BEC-Line/main/becinstall.lua
 becinstall
 ```
 
-The installer updates program files atomically and preserves an existing
-`config.lua`.
+The installer updates program files and preserves an existing `config.lua`.
 
-For a manual installation, copy the repository tree, then:
+For a new installation:
 
 ```sh
 cp config.example.lua config.lua
@@ -85,116 +120,70 @@ edit config.lua
 becctl selftest
 ```
 
-Add the repository directory to `PATH`, or run commands as
-`./becctl.lua ...`.
+Component addresses may be full UUIDs, unique prefixes, or empty when exactly
+one component of that type is visible.
 
-## Configuration
+## Configuration migration
 
-Copy `config.example.lua` to `config.lua`.
+The cell-carousel version removes these old settings:
 
-Component addresses may be full UUIDs or unique prefixes. Empty addresses
-are accepted only when exactly one component of that type is visible.
-Ambiguous prefixes are rejected rather than selecting an arbitrary machine.
+```text
+warehouseInterface
+exportBus
+importBus
+bridgeTransposer
+bridge
+nanites
+commissioning
+```
 
-Configure:
+Replace them with:
 
-- every component address;
-- OC sides for both AE2 buses and the Transposer;
-- separate redstone sides for IO pause and lock release;
-- exact item identities for all ten nanite tiers;
-- initial commissioning count (`1` or `64`);
-- production nanite count (`30720`).
+```lua
+timing.naniteTransferTimeoutSeconds = 60
+cycle.naniteCount = 2048 -- use 30720 on RC-1+
 
-Run `becctl probe` to resolve components and print the full AE2 item details
-found for each configured nanite. Replace label-only descriptors with exact
-`name` and `damage` values before production.
+components.cellTransposer = {
+  type = "transposer",
+  address = "431b799e-00b2-4af7-9d00-0f19bc792e64",
+}
 
-## Staged commissioning
+cellCarousel = {
+  chestSide = sides.east,
+  loadPortSide = sides.north,
+  unloadPortSide = sides.south,
+  cellLabelContains = "Storage Cell",
+  tierSlots = {
+    [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 5,
+    [6] = 6, [7] = 7, [8] = 8, [9] = 9, [10] = 10,
+  },
+}
+```
 
-Do not start with a production BEC recipe.
-
-### 1. Offline simulation
+## Commissioning
 
 ```sh
 becctl selftest
 becctl cycle --simulate
-```
-
-This validates normal cleanup and fail-closed behavior without loading
-OpenComputers components.
-
-### 2. Read-only component probe
-
-```sh
 becctl probe
 becctl status
 ```
 
-Both commands are read-only.
-
-### 3. Cheap transfer bench
-
-Point the configured bridge target at an empty ordinary chest. Stock the
-configured test item (cobblestone by default) in the warehouse AE2 network.
+Manual cell checks:
 
 ```sh
-becctl bench transfer 1
-becctl bench transfer 64
-```
-
-Each run exports into the one-slot buffer, transfers to the target, verifies
-the exact count, returns it through the import bus, and verifies both
-inventories are empty.
-
-### 4. Lock mechanism
-
-Use a blocking AE2 pattern containing exactly one cobblestone. It must land
-in a dedicated high-priority lock chest on the BEC subnetwork.
-
-```sh
-becctl lock acquire
-becctl lock status
-becctl lock release
-```
-
-Verify that a second craft cannot enter until release removes the lock.
-
-### 5. Empty Gate test
-
-With no active recipe and no valuable condensate exposed:
-
-```sh
-becctl gate set neutronium infinity
-becctl gate show
-becctl gate clear
-```
-
-Use registry fluid names, not display names.
-
-### 6. Low-count nanite test
-
-Replace the bench chest with the real nanite containment bus:
-
-```sh
-becctl nanite load 1 1
+becctl nanite load 1 2048
 becctl nanite status
-becctl nanite unload
+becctl nanite unload 1
 ```
 
-Repeat with `64` only after the single-item test returns cleanly.
+Missing tiers appear as `empty` in `probe`; they do not prevent startup.
 
-### 7. Manual BEC recipe
-
-Use one parallel and the least expensive viable recipe:
+Run the first real BEC recipe interactively:
 
 ```sh
 becctl cycle --step
 ```
-
-The controller asks before each mutation. Inspect the world after every
-transition.
-
-### 8. Automatic operation
 
 After manual commissioning:
 
@@ -202,8 +191,7 @@ After manual commissioning:
 becctl cycle --automatic
 ```
 
-The command processes one locked batch and exits. A service wrapper may call
-it repeatedly after the single-cycle behavior is proven.
+The controller processes one locked batch and exits.
 
 ## Commands
 
@@ -211,26 +199,15 @@ it repeatedly after the single-cycle behavior is proven.
 becctl probe
 becctl status
 becctl selftest
-becctl bench transfer [count]
 becctl lock status|acquire|release [--force]
 becctl gate show|set <fluid...>|clear [--force]
-becctl nanite status|load <tier> [count]|unload
+becctl nanite status|load <tier> [minimum]|unload <tier>
 becctl cycle --simulate|--step|--automatic
 ```
 
-Manual Gate or lock mutation is rejected while the IO Node is active unless
-`--force` is supplied. Force is deliberately inconvenient; it can destroy a
-recipe.
-
 ## Recovery
 
-On startup the cycle controller:
-
-1. asserts the pause signal;
-2. reads actual IO, lock, Gate, and nanite state;
-3. rejects an active recipe without exactly one lock;
-4. preserves routing for active work;
-5. cleans stale routing and nanites only when the IO Node is idle and no lock
-   exists.
-
-The journal aids diagnosis but never overrides observed hardware state.
+The journal records the active nanite tier. On restart, the controller pauses
+the IO Node and uses that tier to return any cell left in either IO Port to its
+fixed chest slot. Hardware state remains authoritative; an unknown active cell
+is preserved rather than guessed.

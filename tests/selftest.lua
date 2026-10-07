@@ -25,37 +25,42 @@ simulator.runSelfTests(controller, config)
 
 local function runHardwareAdapterTest()
   local time = 0
-  local sourceCount = 128
-  local buffer = nil
-  local target = nil
-  local importActive = false
+  local availableNanites = 0
+  local providedTier = nil
   local lockCount = 1
   local redstoneOutputs = {}
   local gateFilters = {}
-
-  local item = {
-    name = "minecraft:cobblestone",
-    damage = 0,
-    label = "Cobblestone",
+  local inventories = {
+    [config.cellCarousel.chestSide] = {
+      size = 10,
+      slots = {
+        [1] = {name = "appliedenergistics2:item.ItemBasicStorageCell.4k", label = "4k ME Storage Cell", size = 1, tier = 1, amount = 4096},
+        [2] = {name = "appliedenergistics2:item.ItemBasicStorageCell.4k", label = "4k ME Storage Cell", size = 1, tier = 2, amount = 2048},
+      },
+    },
+    [config.cellCarousel.loadPortSide] = {size = 6, slots = {}},
+    [config.cellCarousel.unloadPortSide] = {size = 6, slots = {}},
   }
 
-  local function stack(size)
-    return {
-      name = item.name,
-      damage = item.damage,
-      label = item.label,
-      size = size,
-    }
+  local function firstCell(side)
+    local inventory = inventories[side]
+    for slot = 1, inventory.size do
+      local stack = inventory.slots[slot]
+      if stack ~= nil then
+        return slot, stack
+      end
+    end
   end
 
   local proxies = {}
-
   proxies.io = {
     getRequiredCondensate = function() return {neutronium = 144} end,
     getConsumedCondensate = function() return {} end,
-    getProvidedTier = function() return nil end,
-    getRequiredTier = function() return nil end,
-    getAvailableNanites = function() return target and target.size or 0 end,
+    getProvidedTier = function()
+      return providedTier and {name = "T" .. providedTier, tier = providedTier} or nil
+    end,
+    getRequiredTier = function() return {name = "T1", tier = 1} end,
+    getAvailableNanites = function() return availableNanites end,
     getRecipeSteps = function() return {} end,
     getState = function() return "idle" end,
     getMinParallel = function() return 1 end,
@@ -81,69 +86,39 @@ local function runHardwareAdapterTest()
     getStoredCondensate = function() return {neutronium = 144} end,
   }
 
-  proxies.warehouse = {
-    getItemsInNetwork = function(filter)
-      if sourceCount > 0 and (filter.name == nil or filter.name == item.name) then
-        return {stack(sourceCount)}
-      end
-      return {}
-    end,
-  }
-
-  proxies.export = {
-    getExportConfiguration = function() return proxies.export.detail end,
-    setExportConfiguration = function(_, _, detail)
-      proxies.export.detail = detail
-    end,
-    exportIntoSlot = function()
-      if proxies.export.detail == nil or buffer ~= nil or sourceCount == 0 then
-        return false
-      end
-      local amount = math.min(64, sourceCount)
-      sourceCount = sourceCount - amount
-      buffer = stack(amount)
-      return true
-    end,
-  }
-
-  proxies.import = {
-    getImportConfiguration = function() return proxies.import.detail end,
-    setImportConfiguration = function(_, _, detail)
-      proxies.import.detail = detail
-      importActive = detail ~= nil
-    end,
-  }
-
   proxies.transposer = {
-    getStackInSlot = function(side)
-      if side == config.bridge.bufferSide then return buffer end
-      if side == config.bridge.targetSide then return target end
-      return nil
+    getInventorySize = function(side)
+      return inventories[side] and inventories[side].size or 0
     end,
-    transferItem = function(sourceSide, targetSide, count)
-      if sourceSide == config.bridge.bufferSide and targetSide == config.bridge.targetSide then
-        if buffer == nil then return 0 end
-        local moved = math.min(count, buffer.size)
-        buffer.size = buffer.size - moved
-        target = target or stack(0)
-        target.size = target.size + moved
-        if buffer.size == 0 then buffer = nil end
-        return moved
-      elseif sourceSide == config.bridge.targetSide and targetSide == config.bridge.bufferSide then
-        if target == nil or buffer ~= nil then return 0 end
-        local moved = math.min(count, target.size)
-        target.size = target.size - moved
-        buffer = stack(moved)
-        if target.size == 0 then target = nil end
-        return moved
+    getStackInSlot = function(side, slot)
+      return inventories[side] and inventories[side].slots[slot] or nil
+    end,
+    transferItem = function(sourceSide, targetSide, count, sourceSlot, sinkSlot)
+      local source = inventories[sourceSide]
+      local target = inventories[targetSide]
+      if source == nil or target == nil or count ~= 1 then return 0 end
+      local stack = source.slots[sourceSlot]
+      if stack == nil then return 0 end
+
+      if sinkSlot == nil then
+        for slot = 1, target.size do
+          if target.slots[slot] == nil then
+            sinkSlot = slot
+            break
+          end
+        end
       end
-      return 0
+      if sinkSlot == nil or target.slots[sinkSlot] ~= nil then return 0 end
+
+      source.slots[sourceSlot] = nil
+      target.slots[sinkSlot] = stack
+      return 1
     end,
   }
 
   proxies.lock = {
     getItemsInNetwork = function()
-      return lockCount == 1 and {stack(1)} or {}
+      return lockCount == 1 and {{name = "minecraft:cobblestone", damage = 0, size = 1}} or {}
     end,
   }
 
@@ -161,9 +136,6 @@ local function runHardwareAdapterTest()
     io = "bec_io_node",
     gate = "bec_diode",
     storage = "bec_storage",
-    warehouse = "me_interface",
-    export = "me_exportbus",
-    import = "me_importbus",
     transposer = "transposer",
     lock = "me_interface",
     redstone = "redstone",
@@ -173,9 +145,7 @@ local function runHardwareAdapterTest()
   function fakeComponent.list(componentType)
     local addresses = {}
     for address, currentType in pairs(componentTypes) do
-      if currentType == componentType then
-        addresses[#addresses + 1] = address
-      end
+      if currentType == componentType then addresses[#addresses + 1] = address end
     end
     table.sort(addresses)
     local index = 0
@@ -201,9 +171,14 @@ local function runHardwareAdapterTest()
   package.loaded["computer"] = {uptime = function() return time end}
   os.sleep = function(seconds)
     time = time + seconds
-    if importActive and buffer ~= nil then
-      sourceCount = sourceCount + buffer.size
-      buffer = nil
+    local _, loadCell = firstCell(config.cellCarousel.loadPortSide)
+    local _, unloadCell = firstCell(config.cellCarousel.unloadPortSide)
+    if loadCell ~= nil and availableNanites == 0 then
+      availableNanites = loadCell.amount
+      providedTier = loadCell.tier
+    elseif unloadCell ~= nil and availableNanites > 0 then
+      availableNanites = 0
+      providedTier = nil
     end
   end
 
@@ -211,10 +186,7 @@ local function runHardwareAdapterTest()
   testConfig.components.ioNode.address = "io"
   testConfig.components.gate.address = "gate"
   testConfig.components.storage.address = "storage"
-  testConfig.components.warehouseInterface.address = "warehouse"
-  testConfig.components.exportBus.address = "export"
-  testConfig.components.importBus.address = "import"
-  testConfig.components.bridgeTransposer.address = "transposer"
+  testConfig.components.cellTransposer.address = "transposer"
   testConfig.components.lockInterface.address = "lock"
   testConfig.components.redstone.address = "redstone"
 
@@ -226,12 +198,27 @@ local function runHardwareAdapterTest()
   assert(table.concat(hardware.gate:names(), ",") == "infinity,neutronium", "gate adapter mismatch")
   hardware.gate:clear()
 
-  hardware.bridge:load(item, 65)
-  assert(hardware.bridge:targetCount() == 65, "bridge forward transfer mismatch")
-  assert(buffer == nil, "bridge left buffer contents after load")
-  hardware.bridge:unload()
-  assert(target == nil and buffer == nil, "bridge reverse transfer left contents")
-  assert(sourceCount == 128, "bridge did not restore warehouse count")
+  local initial = hardware.nanites:status()
+  assert(initial.tiers[1].state == "home", "tier-1 cell not detected")
+  assert(initial.tiers[3].state == "empty", "empty tier slot was not tolerated")
+
+  hardware.nanites:load(1, 2048, true)
+  assert(availableNanites == 4096, "oversized cell was not accepted")
+  assert(hardware.nanites:status().tiers[1].state == "empty", "tier-1 cell did not leave home")
+
+  hardware.nanites:load(2, 2048, true)
+  assert(inventories[config.cellCarousel.chestSide].slots[1] ~= nil, "tier-1 cell did not return home")
+  assert(availableNanites == 2048 and providedTier == 2, "tier-2 cell did not load")
+
+  hardware.nanites:unload(2)
+  assert(availableNanites == 0, "nanites remained after unload")
+  assert(inventories[config.cellCarousel.chestSide].slots[2] ~= nil, "tier-2 cell did not return home")
+
+  local missingTierLoaded = pcall(function()
+    hardware.nanites:load(3, 2048, true)
+  end)
+  assert(not missingTierLoaded, "empty tier slot unexpectedly loaded")
+  assert(availableNanites == 0, "missing tier test changed nanite inventory")
 
   hardware.lock:release()
   assert(lockCount == 0, "lock adapter did not release token")

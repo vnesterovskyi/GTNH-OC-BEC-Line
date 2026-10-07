@@ -230,250 +230,225 @@ function Lock:release()
   end, self.environment.operationTimeoutSeconds, "lock item removal")
 end
 
-local ItemBridge = {}
-ItemBridge.__index = ItemBridge
+local CellCarousel = {}
+CellCarousel.__index = CellCarousel
 
-function ItemBridge.new(warehouse, exportBus, importBus, transposer, config, environment)
+function CellCarousel.new(transposer, ioNode, config, environment)
   return setmetatable({
-    warehouse = warehouse,
-    exportBus = exportBus,
-    importBus = importBus,
     transposer = transposer,
+    ioNode = ioNode,
     config = config,
     environment = environment,
-  }, ItemBridge)
+  }, CellCarousel)
 end
 
-function ItemBridge:bufferStack()
-  local stack = self.transposer.getStackInSlot(self.config.bufferSide, self.config.bufferSlot)
+function CellCarousel:isStorageCell(stack)
+  if util.isEmptyStack(stack) then
+    return false
+  end
+  local label = stack.label or ""
+  return label:find(self.config.cellLabelContains, 1, true) ~= nil
+end
+
+function CellCarousel:stack(side, slot)
+  local stack = self.transposer.getStackInSlot(side, slot)
   if util.isEmptyStack(stack) then
     return nil
   end
   return stack
 end
 
-function ItemBridge:targetStack()
-  local stack = self.transposer.getStackInSlot(self.config.targetSide, self.config.targetSlot)
-  if util.isEmptyStack(stack) then
-    return nil
-  end
-  return stack
-end
+function CellCarousel:findCell(side)
+  local size = self.transposer.getInventorySize(side)
+  local foundSlot = nil
+  local foundStack = nil
 
-function ItemBridge:targetCount()
-  local stack = self:targetStack()
-  return stack and (stack.size or 0) or 0
-end
-
-function ItemBridge:clearExport()
-  self.exportBus.setExportConfiguration(
-    self.config.exportPartSide,
-    self.config.exportFilterSlot
-  )
-  local configured = self.exportBus.getExportConfiguration(
-    self.config.exportPartSide,
-    self.config.exportFilterSlot
-  )
-  if not util.isEmptyStack(configured) then
-    error("ME export bus filter did not clear: " .. util.describe(configured))
-  end
-end
-
-function ItemBridge:clearImport()
-  self.importBus.setImportConfiguration(
-    self.config.importPartSide,
-    self.config.importFilterSlot
-  )
-  local configured = self.importBus.getImportConfiguration(
-    self.config.importPartSide,
-    self.config.importFilterSlot
-  )
-  if not util.isEmptyStack(configured) then
-    error("ME import bus filter did not clear: " .. util.describe(configured))
-  end
-end
-
-function ItemBridge:setExport(detail)
-  self.exportBus.setExportConfiguration(
-    self.config.exportPartSide,
-    self.config.exportFilterSlot,
-    detail
-  )
-  local configured = self.exportBus.getExportConfiguration(
-    self.config.exportPartSide,
-    self.config.exportFilterSlot
-  )
-  if configured == nil or not util.itemMatches(configured, detail) then
-    error("ME export bus filter verification failed: " .. util.describe(configured))
-  end
-end
-
-function ItemBridge:setImport(detail)
-  self.importBus.setImportConfiguration(
-    self.config.importPartSide,
-    self.config.importFilterSlot,
-    detail
-  )
-  local configured = self.importBus.getImportConfiguration(
-    self.config.importPartSide,
-    self.config.importFilterSlot
-  )
-  if configured == nil or not util.itemMatches(configured, detail) then
-    error("ME import bus filter verification failed: " .. util.describe(configured))
-  end
-end
-
-function ItemBridge:warehouseStack(filter)
-  local stacks = self.warehouse.getItemsInNetwork(filter) or {}
-  local matches = {}
-  for _, stack in pairs(stacks) do
-    if util.itemMatches(stack, filter) then
-      matches[#matches + 1] = stack
-    end
-  end
-
-  if #matches == 0 then
-    return nil
-  elseif #matches > 1 then
-    error("Warehouse filter is ambiguous: " .. util.describe(filter))
-  end
-  return matches[1]
-end
-
-function ItemBridge:waitForBufferEmpty()
-  util.waitUntil(self.environment, function()
-    local stack = self:bufferStack()
-    return stack == nil, stack and util.describe(stack) or nil
-  end, self.environment.operationTimeoutSeconds, "transfer buffer to empty")
-end
-
-function ItemBridge:drainBuffer()
-  local stack = self:bufferStack()
-  if stack == nil then
-    return
-  end
-
-  self:clearExport()
-  self:setImport(util.itemIdentity(stack))
-  self:waitForBufferEmpty()
-  self:clearImport()
-end
-
-function ItemBridge:load(filter, count)
-  util.requirePositiveInteger(count, "Transfer count")
-  self:clearExport()
-  self:clearImport()
-  self:drainBuffer()
-
-  local existing = self:targetStack()
-  if existing ~= nil then
-    error("Bridge target is not empty: " .. util.describe(existing))
-  end
-
-  local source = self:warehouseStack(filter)
-  if source == nil then
-    error("Warehouse does not contain " .. util.describe(filter))
-  elseif (source.size or 0) < count then
-    error("Warehouse has " .. tostring(source.size or 0) .. " items; " .. count .. " required")
-  end
-
-  local identity = util.itemIdentity(source)
-  self:setExport(identity)
-
-  while self:targetCount() < count do
-    self.exportBus.exportIntoSlot(
-      self.config.exportPartSide,
-      self.config.bufferSlot
-    )
-
-    local buffer = util.waitUntil(self.environment, function()
-      local stack = self:bufferStack()
-      if stack ~= nil then
-        return true, stack
+  for slot = 1, size do
+    local stack = self:stack(side, slot)
+    if stack ~= nil and self:isStorageCell(stack) then
+      if foundSlot ~= nil then
+        error("Multiple storage cells found on Transposer side " .. side)
       end
-      return false, "buffer is empty"
-    end, self.environment.operationTimeoutSeconds, "warehouse export")
-
-    if not util.itemMatches(buffer, identity) then
-      error("Unexpected item entered transfer buffer: " .. util.describe(buffer))
-    end
-
-    local remaining = count - self:targetCount()
-    local moved = self.transposer.transferItem(
-      self.config.bufferSide,
-      self.config.targetSide,
-      math.min(remaining, buffer.size or remaining),
-      self.config.bufferSlot,
-      self.config.targetSlot
-    )
-    if moved == nil or moved <= 0 then
-      error("Transposer failed to move item into bridge target")
+      foundSlot = slot
+      foundStack = stack
     end
   end
-
-  self:clearExport()
-  self:drainBuffer()
-  self:clearImport()
-
-  local target = self:targetStack()
-  if target == nil or not util.itemMatches(target, identity) or (target.size or 0) ~= count then
-    error("Bridge target verification failed: " .. util.describe(target))
-  end
-  return target
+  return foundSlot, foundStack
 end
 
-function ItemBridge:unload()
-  self:clearExport()
-  self:clearImport()
-  self:drainBuffer()
+function CellCarousel:homeCell(tier)
+  local slot = self.config.tierSlots[tier]
+  if slot == nil then
+    return nil, nil
+  end
+  local stack = self:stack(self.config.chestSide, slot)
+  if stack ~= nil and not self:isStorageCell(stack) then
+    error("Tier " .. tier .. " chest slot " .. slot .. " contains " .. tostring(stack.label))
+  end
+  return slot, stack
+end
 
-  while self:targetStack() ~= nil do
-    local target = self:targetStack()
-    self:setImport(util.itemIdentity(target))
-
-    local moved = self.transposer.transferItem(
-      self.config.targetSide,
-      self.config.bufferSide,
-      target.size,
-      self.config.targetSlot,
-      self.config.bufferSlot
+function CellCarousel:moveCell(fromSide, toSide, sourceSlot, sinkSlot)
+  local moved, reason
+  if sinkSlot ~= nil then
+    moved, reason = self.transposer.transferItem(
+      fromSide,
+      toSide,
+      1,
+      sourceSlot,
+      sinkSlot
     )
-    if moved == nil or moved <= 0 then
-      error("Transposer failed to remove item from bridge target")
-    end
-    self:waitForBufferEmpty()
+  else
+    moved, reason = self.transposer.transferItem(
+      fromSide,
+      toSide,
+      1,
+      sourceSlot
+    )
+  end
+  if moved ~= 1 then
+    error("Storage cell transfer failed: " .. tostring(reason))
+  end
+end
+
+function CellCarousel:waitForNanites(expected, allowOvershoot)
+  util.waitUntil(self.environment, function()
+    local actual = self.ioNode.getAvailableNanites()
+    local ready = allowOvershoot and actual >= expected or actual == expected
+    return ready, "IO Node reports " .. tostring(actual)
+  end, self.environment.naniteTransferTimeoutSeconds,
+    (allowOvershoot and "at least " or "") .. expected .. " available nanites")
+end
+
+function CellCarousel:hasActiveCell()
+  local loadSlot = self:findCell(self.config.loadPortSide)
+  local unloadSlot = self:findCell(self.config.unloadPortSide)
+  return loadSlot ~= nil or unloadSlot ~= nil or self.ioNode.getAvailableNanites() > 0
+end
+
+function CellCarousel:load(tier, count)
+  util.requirePositiveInteger(tier, "Nanite tier")
+  util.requirePositiveInteger(count, "Nanite count")
+
+  local loadSlot = self:findCell(self.config.loadPortSide)
+  local unloadSlot = self:findCell(self.config.unloadPortSide)
+  if loadSlot ~= nil or unloadSlot ~= nil or self.ioNode.getAvailableNanites() > 0 then
+    error("Cannot load tier " .. tier .. ": a storage cell or nanites are already active")
   end
 
-  self:clearImport()
-  if self:targetStack() ~= nil or self:bufferStack() ~= nil then
-    error("Bridge did not unload completely")
+  local chestSlot, cell = self:homeCell(tier)
+  if chestSlot == nil then
+    error("No chest slot configured for nanite tier " .. tier)
+  elseif cell == nil then
+    error("Nanite tier " .. tier .. " cell slot " .. chestSlot .. " is empty")
   end
+
+  self:moveCell(self.config.chestSide, self.config.loadPortSide, chestSlot)
+  self:waitForNanites(count, true)
+
+  if self:findCell(self.config.loadPortSide) == nil then
+    error("Tier " .. tier .. " cell disappeared from the load IO Port")
+  end
+end
+
+function CellCarousel:unload(tier)
+  util.requirePositiveInteger(tier, "Nanite tier")
+  local chestSlot, homeCell = self:homeCell(tier)
+  if chestSlot == nil then
+    error("No chest slot configured for nanite tier " .. tier)
+  end
+
+  local loadSlot = self:findCell(self.config.loadPortSide)
+  local unloadSlot = self:findCell(self.config.unloadPortSide)
+  if loadSlot ~= nil and unloadSlot ~= nil then
+    error("Storage cells are present in both IO Ports")
+  end
+
+  if loadSlot ~= nil then
+    if homeCell ~= nil then
+      error("Tier " .. tier .. " home slot is occupied while its cell is active")
+    end
+    self:moveCell(
+      self.config.loadPortSide,
+      self.config.unloadPortSide,
+      loadSlot
+    )
+  elseif unloadSlot == nil then
+    if self.ioNode.getAvailableNanites() == 0 and homeCell ~= nil then
+      return
+    end
+    error("Cannot locate the active tier " .. tier .. " storage cell")
+  end
+
+  self:waitForNanites(0, false)
+  unloadSlot = self:findCell(self.config.unloadPortSide)
+  if unloadSlot == nil then
+    error("Tier " .. tier .. " cell disappeared from the unload IO Port")
+  end
+  if self:stack(self.config.chestSide, chestSlot) ~= nil then
+    error("Tier " .. tier .. " home slot " .. chestSlot .. " is occupied")
+  end
+
+  self:moveCell(
+    self.config.unloadPortSide,
+    self.config.chestSide,
+    unloadSlot,
+    chestSlot
+  )
+  local _, returnedCell = self:homeCell(tier)
+  if returnedCell == nil then
+    error("Tier " .. tier .. " cell did not return to chest slot " .. chestSlot)
+  end
+end
+
+function CellCarousel:status()
+  local tiers = {}
+  for tier = 1, 10 do
+    local slot, cell = self:homeCell(tier)
+    tiers[tier] = {
+      slot = slot,
+      state = cell and "home" or "empty",
+      label = cell and cell.label or nil,
+    }
+  end
+  local loadSlot, loadCell = self:findCell(self.config.loadPortSide)
+  local unloadSlot, unloadCell = self:findCell(self.config.unloadPortSide)
+  return {
+    tiers = tiers,
+    loadPort = loadCell and {slot = loadSlot, label = loadCell.label} or nil,
+    unloadPort = unloadCell and {slot = unloadSlot, label = unloadCell.label} or nil,
+    available = self.ioNode.getAvailableNanites(),
+    providedTier = self.ioNode.getProvidedTier(),
+    requiredTier = self.ioNode.getRequiredTier(),
+  }
 end
 
 local Nanites = {}
 Nanites.__index = Nanites
 
-function Nanites.new(bridge, ioNode, tiers)
+function Nanites.new(carousel, ioNode)
   return setmetatable({
-    bridge = bridge,
+    carousel = carousel,
     ioNode = ioNode,
-    tiers = tiers,
+    loadedTier = nil,
   }, Nanites)
 end
 
+function Nanites:setLoadedTier(tier)
+  self.loadedTier = tier
+end
+
+function Nanites:hasActiveCell()
+  return self.carousel:hasActiveCell()
+end
+
 function Nanites:load(tier, count, requireReportedTier)
-  local descriptor = self.tiers[tier]
-  if descriptor == nil then
-    error("No item descriptor configured for nanite tier " .. tostring(tier))
+  if self:hasActiveCell() then
+    self:unload(self.loadedTier)
   end
 
-  self.bridge:unload()
-  self.bridge:load(descriptor, count)
-
-  local reportedCount = self.ioNode.getAvailableNanites()
-  if reportedCount ~= nil and reportedCount > 0 and reportedCount ~= count then
-    error("IO Node reports " .. reportedCount .. " nanites; expected " .. count)
-  end
+  self.loadedTier = tier
+  self.carousel:load(tier, count)
 
   local provided = self.ioNode.getProvidedTier()
   if requireReportedTier and (provided == nil or provided.tier ~= tier) then
@@ -483,22 +458,27 @@ function Nanites:load(tier, count, requireReportedTier)
   end
 end
 
-function Nanites:unload()
-  self.bridge:unload()
-  local reportedCount = self.ioNode.getAvailableNanites()
-  if reportedCount ~= nil and reportedCount > 0 then
-    error("IO Node still reports " .. reportedCount .. " nanites after unload")
+function Nanites:unload(tier)
+  if not self:hasActiveCell() then
+    self.loadedTier = nil
+    return
   end
+
+  tier = tier or self.loadedTier
+  local provided = self.ioNode.getProvidedTier()
+  tier = tier or (provided and provided.tier or nil)
+  if tier == nil then
+    error("Active storage cell tier is unknown; preserve it and supply the tier manually")
+  end
+
+  self.carousel:unload(tier)
+  self.loadedTier = nil
 end
 
 function Nanites:status()
-  return {
-    target = self.bridge:targetStack(),
-    buffer = self.bridge:bufferStack(),
-    available = self.ioNode.getAvailableNanites(),
-    providedTier = self.ioNode.getProvidedTier(),
-    requiredTier = self.ioNode.getRequiredTier(),
-  }
+  local status = self.carousel:status()
+  status.loadedTier = self.loadedTier
+  return status
 end
 
 local function buildEnvironment(config)
@@ -506,6 +486,7 @@ local function buildEnvironment(config)
   return {
     pollSeconds = config.timing.pollSeconds,
     operationTimeoutSeconds = config.timing.operationTimeoutSeconds,
+    naniteTransferTimeoutSeconds = config.timing.naniteTransferTimeoutSeconds,
     resumePulseSeconds = config.timing.resumePulseSeconds,
     now = computer.uptime,
     sleep = os.sleep,
@@ -535,17 +516,8 @@ function hardware.build(config)
   local storageProxy = resolve("storage", {
     "getFieldStrength", "setFieldStrength", "getStoredCondensate",
   })
-  local warehouse = resolve("warehouseInterface", {
-    "getItemsInNetwork",
-  })
-  local exportBus = resolve("exportBus", {
-    "getExportConfiguration", "setExportConfiguration", "exportIntoSlot",
-  })
-  local importBus = resolve("importBus", {
-    "getImportConfiguration", "setImportConfiguration",
-  })
-  local transposer = resolve("bridgeTransposer", {
-    "getStackInSlot", "transferItem",
+  local transposer = resolve("cellTransposer", {
+    "getInventorySize", "getStackInSlot", "transferItem",
   })
   local lockInterface = resolve("lockInterface", {
     "getItemsInNetwork",
@@ -558,12 +530,10 @@ function hardware.build(config)
     error("Pause and lock-release redstone outputs must use different sides")
   end
 
-  local bridge = ItemBridge.new(
-    warehouse,
-    exportBus,
-    importBus,
+  local carousel = CellCarousel.new(
     transposer,
-    config.bridge,
+    ioNode,
+    config.cellCarousel,
     environment
   )
 
@@ -575,8 +545,8 @@ function hardware.build(config)
     storage = Storage.new(storageProxy),
     pause = PauseControl.new(redstone, config.ioControl, environment),
     lock = Lock.new(lockInterface, redstone, config.lock, environment),
-    bridge = bridge,
-    nanites = Nanites.new(bridge, ioNode, config.nanites),
+    carousel = carousel,
+    nanites = Nanites.new(carousel, ioNode),
   }
 end
 
