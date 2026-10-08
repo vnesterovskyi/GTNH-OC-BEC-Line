@@ -182,17 +182,17 @@ function Lock.new(transposer, config, environment)
 end
 
 function Lock:contents()
-  local total = 0
-  local sourceSlot = nil
-  local size = self.transposer.getInventorySize(self.config.chestSide)
-  for slot = 1, size do
-    local stack = self.transposer.getStackInSlot(self.config.chestSide, slot)
-    if util.itemMatches(stack, self.config.item) then
-      total = total + (stack.size or 0)
-      sourceSlot = sourceSlot or slot
-    end
+  local stack = self.transposer.getStackInSlot(
+    self.config.chestSide,
+    self.config.chestSlot
+  )
+  if util.isEmptyStack(stack) then
+    return 0, nil
+  elseif not util.itemMatches(stack, self.config.item) then
+    error("Lock chest slot " .. self.config.chestSlot
+      .. " contains unexpected item " .. tostring(stack.label))
   end
-  return total, sourceSlot
+  return stack.size or 0, self.config.chestSlot
 end
 
 function Lock:count()
@@ -553,6 +553,34 @@ function hardware.build(config)
     carousel = carousel,
     nanites = Nanites.new(carousel, ioNode),
   }
+end
+
+function hardware.buildLock(config, includeIoNode)
+  local component = require("component")
+  local environment = buildEnvironment(config)
+  local lockProxy, lockDescriptor = resolveComponent(
+    component,
+    "lockTransposer",
+    config.components.lockTransposer,
+    {"getInventorySize", "getStackInSlot", "transferItem"}
+  )
+  local result = {
+    environment = environment,
+    metadata = {lockDescriptor},
+    lock = Lock.new(lockProxy, config.lock, environment),
+  }
+
+  if includeIoNode then
+    local ioNode, ioDescriptor = resolveComponent(
+      component,
+      "ioNode",
+      config.components.ioNode,
+      {"getState"}
+    )
+    result.io = ioNode
+    result.metadata[#result.metadata + 1] = ioDescriptor
+  end
+  return result
 end
 
 function hardware.discover(config)

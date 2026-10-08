@@ -166,6 +166,7 @@ components.lockTransposer = {
 lock = {
   item = {name = "minecraft:cobblestone", damage = 0},
   chestSide = sides.north,
+  chestSlot = 1,
   trashSide = sides.south,
 }
 

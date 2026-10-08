@@ -79,8 +79,8 @@ local function status(config)
 end
 
 local function runLock(config, args)
-  local hardware = hardwareFactory.build(config)
   local action = args[2]
+  local hardware = hardwareFactory.buildLock(config, action == "release")
   if action == "status" then
     print("Lock count: " .. hardware.lock:count())
   elseif action == "acquire" then
