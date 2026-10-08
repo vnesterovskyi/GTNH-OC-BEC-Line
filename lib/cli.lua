@@ -88,8 +88,8 @@ local function runLock(config, args)
     print("Lock acquired")
   elseif action == "release" then
     safeToMutateIdle(hardware.io, contains(args, "--force"))
-    hardware.lock:release()
-    print("Lock released")
+    local released = hardware.lock:release()
+    print(released and "Lock released" or "Lock already clear")
   else
     error("Expected: lock status|acquire|release")
   end

@@ -191,17 +191,24 @@ function Lock.new(transposer, config, environment)
 end
 
 function Lock:contents()
-  local stack = self.transposer.getStackInSlot(
-    self.config.chestSide,
-    self.config.chestSlot
-  )
-  if util.isEmptyStack(stack) then
-    return 0, nil
-  elseif not util.itemMatches(stack, self.config.item) then
-    error("Lock chest slot " .. self.config.chestSlot
-      .. " contains unexpected item " .. tostring(stack.label))
+  local total = 0
+  local sources = {}
+  for _, slot in ipairs(self.config.chestSlots) do
+    local stack = self.transposer.getStackInSlot(self.config.chestSide, slot)
+    if not util.isEmptyStack(stack) then
+      if not util.itemMatches(stack, self.config.item) then
+        error("Lock chest slot " .. slot
+          .. " contains unexpected item " .. tostring(stack.label))
+      end
+      local count = stack.size or 0
+      total = total + count
+      sources[#sources + 1] = {slot = slot, count = count}
+    end
   end
-  return stack.size or 0, self.config.chestSlot
+  if total > self.config.maxTokens then
+    error("Lock chest contains " .. total .. " tokens; maximum is " .. self.config.maxTokens)
+  end
+  return total, sources
 end
 
 function Lock:count()
@@ -210,42 +217,40 @@ end
 
 function Lock:assertValid()
   local count = self:count()
-  if count > 1 then
-    error("BEC subnetwork contains " .. count .. " lock items; expected exactly one")
-  end
-  return count == 1
+  return count >= 1
 end
 
 function Lock:waitForAcquire(timeoutSeconds)
   util.waitUntil(self.environment, function()
     local count = self:count()
-    if count > 1 then
-      error("BEC subnetwork contains " .. count .. " lock items; expected exactly one")
-    end
-    return count == 1, "lock count is " .. count
-  end, timeoutSeconds, "one lock item")
+    return count >= 1, "lock count is " .. count
+  end, timeoutSeconds, "one or more lock items")
 end
 
 function Lock:release()
-  local count, sourceSlot = self:contents()
-  if count ~= 1 or sourceSlot == nil then
-    error("Cannot release lock: expected exactly one lock item")
+  local count, sources = self:contents()
+  if count == 0 then
+    return false
   end
 
-  local moved, reason = self.transposer.transferItem(
-    self.config.chestSide,
-    self.config.trashSide,
-    1,
-    sourceSlot
-  )
-  if moved ~= 1 then
-    error("Lock Transposer failed to void cobblestone: " .. tostring(reason))
+  for _, source in ipairs(sources) do
+    local moved, reason = self.transposer.transferItem(
+      self.config.chestSide,
+      self.config.trashSide,
+      source.count,
+      source.slot
+    )
+    if moved ~= source.count then
+      error("Lock Transposer moved " .. tostring(moved)
+        .. " of " .. source.count .. " tokens: " .. tostring(reason))
+    end
   end
 
   util.waitUntil(self.environment, function()
     local count = self:count()
     return count == 0, "lock count is " .. count
   end, self.environment.operationTimeoutSeconds, "lock item removal")
+  return true
 end
 
 local CellCarousel = {}

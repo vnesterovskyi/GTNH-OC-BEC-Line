@@ -42,7 +42,8 @@ return {
   lock = {
     item = {name = "minecraft:cobblestone", damage = 0},
     chestSide = sides.north,
-    chestSlot = 1,
+    chestSlots = {1, 2, 3, 4},
+    maxTokens = 4,
     trashSide = sides.south,
   },
 
