@@ -16,7 +16,6 @@ local files = {
   "lib/journal.lua",
   "lib/simulator.lua",
   "lib/util.lua",
-  "tests/selftest.lua",
 }
 
 if not component.isAvailable("internet") then
@@ -73,6 +72,16 @@ for _, path in ipairs(files) do
   download(path)
 end
 
+for _, path in ipairs({"tests/selftest.lua"}) do
+  local obsoletePath = shell.resolve(path)
+  if filesystem.exists(obsoletePath) then
+    local removed, removeError = filesystem.remove(obsoletePath)
+    if not removed then
+      error("Unable to remove obsolete " .. path .. ": " .. tostring(removeError))
+    end
+  end
+end
+
 local configPath = shell.resolve("config.lua")
 local exampleConfigPath = shell.resolve("config.example.lua")
 if not filesystem.exists(configPath) then
@@ -94,4 +103,4 @@ else
   print("Preserved existing config.lua")
 end
 
-print("Installation complete. Run: becctl selftest")
+print("Installation complete. Run: becctl cycle --simulate")

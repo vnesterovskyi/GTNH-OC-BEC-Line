@@ -173,24 +173,30 @@ end
 local Lock = {}
 Lock.__index = Lock
 
-function Lock.new(interfaceProxy, redstoneProxy, config, environment)
+function Lock.new(transposer, config, environment)
   return setmetatable({
-    interface = interfaceProxy,
-    redstone = redstoneProxy,
+    transposer = transposer,
     config = config,
     environment = environment,
   }, Lock)
 end
 
-function Lock:count()
-  local stacks = self.interface.getItemsInNetwork(self.config.item) or {}
+function Lock:contents()
   local total = 0
-  for _, stack in pairs(stacks) do
+  local sourceSlot = nil
+  local size = self.transposer.getInventorySize(self.config.chestSide)
+  for slot = 1, size do
+    local stack = self.transposer.getStackInSlot(self.config.chestSide, slot)
     if util.itemMatches(stack, self.config.item) then
       total = total + (stack.size or 0)
+      sourceSlot = sourceSlot or slot
     end
   end
-  return total
+  return total, sourceSlot
+end
+
+function Lock:count()
+  return self:contents()
 end
 
 function Lock:assertValid()
@@ -212,16 +218,19 @@ function Lock:waitForAcquire(timeoutSeconds)
 end
 
 function Lock:release()
-  if self:count() ~= 1 then
+  local count, sourceSlot = self:contents()
+  if count ~= 1 or sourceSlot == nil then
     error("Cannot release lock: expected exactly one lock item")
   end
 
-  self.redstone.setOutput(self.config.releaseSide, self.config.releaseActiveOutput)
-  self.environment.sleep(self.config.releasePulseSeconds)
-  self.redstone.setOutput(self.config.releaseSide, self.config.releaseIdleOutput)
-  local actual = self.redstone.getOutput(self.config.releaseSide)
-  if actual ~= self.config.releaseIdleOutput then
-    error("Lock release redstone output did not return idle; actual " .. tostring(actual))
+  local moved, reason = self.transposer.transferItem(
+    self.config.chestSide,
+    self.config.trashSide,
+    1,
+    sourceSlot
+  )
+  if moved ~= 1 then
+    error("Lock Transposer failed to void cobblestone: " .. tostring(reason))
   end
 
   util.waitUntil(self.environment, function()
@@ -519,16 +528,12 @@ function hardware.build(config)
   local transposer = resolve("cellTransposer", {
     "getInventorySize", "getStackInSlot", "transferItem",
   })
-  local lockInterface = resolve("lockInterface", {
-    "getItemsInNetwork",
+  local lockTransposer = resolve("lockTransposer", {
+    "getInventorySize", "getStackInSlot", "transferItem",
   })
   local redstone = resolve("redstone", {
     "getOutput", "setOutput",
   })
-
-  if config.ioControl.side == config.lock.releaseSide then
-    error("Pause and lock-release redstone outputs must use different sides")
-  end
 
   local carousel = CellCarousel.new(
     transposer,
@@ -544,7 +549,7 @@ function hardware.build(config)
     gate = Gate.new(gateProxy),
     storage = Storage.new(storageProxy),
     pause = PauseControl.new(redstone, config.ioControl, environment),
-    lock = Lock.new(lockInterface, redstone, config.lock, environment),
+    lock = Lock.new(lockTransposer, config.lock, environment),
     carousel = carousel,
     nanites = Nanites.new(carousel, ioNode),
   }

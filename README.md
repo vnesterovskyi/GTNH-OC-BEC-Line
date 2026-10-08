@@ -94,11 +94,20 @@ zero.
 - Adapter touching the IO Node controller (`bec_io_node`).
 - Adapter touching the Maxwell Gate controller (`bec_diode`).
 - Adapter touching the Containment Field controller (`bec_storage`).
-- Adapter touching an ME Interface on the lock/staging network.
-- Redstone component with separate outputs for:
-  - Teleportation Node Controller Hatch;
-  - cobblestone lock removal.
-- Transposer connected directly to the OC network.
+- Cell-carousel Transposer connected directly to the OC network.
+- Lock Transposer between the filtered lock chest and Item Trash Can.
+- Redstone component connected to the Teleportation Node Controller Hatch.
+
+```text
+Filtered cobblestone chest
+          |
+    Lock Transposer
+          |
+     Item Trash Can
+```
+
+The Lock Transposer reads the chest directly and moves exactly one cobblestone
+to trash when the completed cycle releases its lock.
 
 Configure the Teleportation Node Controller Hatch to pause on nanite-step
 transitions.
@@ -117,7 +126,7 @@ For a new installation:
 ```sh
 cp config.example.lua config.lua
 edit config.lua
-becctl selftest
+becctl cycle --simulate
 ```
 
 Component addresses may be full UUIDs, unique prefixes, or empty when exactly
@@ -135,6 +144,7 @@ bridgeTransposer
 bridge
 nanites
 commissioning
+lockInterface
 ```
 
 Replace them with:
@@ -146,6 +156,17 @@ cycle.naniteCount = 2048 -- use 30720 on RC-1+
 components.cellTransposer = {
   type = "transposer",
   address = "431b799e-00b2-4af7-9d00-0f19bc792e64",
+}
+
+components.lockTransposer = {
+  type = "transposer",
+  address = "75090454-978c-4b3e-9eef-27be32d992d5",
+}
+
+lock = {
+  item = {name = "minecraft:cobblestone", damage = 0},
+  chestSide = sides.north,
+  trashSide = sides.south,
 }
 
 cellCarousel = {
@@ -163,7 +184,6 @@ cellCarousel = {
 ## Commissioning
 
 ```sh
-becctl selftest
 becctl cycle --simulate
 becctl probe
 becctl status
@@ -198,7 +218,6 @@ The controller processes one locked batch and exits.
 ```text
 becctl probe
 becctl status
-becctl selftest
 becctl lock status|acquire|release [--force]
 becctl gate show|set <fluid...>|clear [--force]
 becctl nanite status|load <tier> [minimum]|unload <tier>

@@ -25,7 +25,7 @@ return {
     gate = {type = "bec_diode", address = ""},
     storage = {type = "bec_storage", address = ""},
     cellTransposer = {type = "transposer", address = ""},
-    lockInterface = {type = "me_interface", address = ""},
+    lockTransposer = {type = "transposer", address = ""},
     redstone = {type = "redstone", address = ""},
   },
 
@@ -37,10 +37,8 @@ return {
 
   lock = {
     item = {name = "minecraft:cobblestone", damage = 0},
-    releaseSide = sides.south,
-    releaseActiveOutput = 15,
-    releaseIdleOutput = 0,
-    releasePulseSeconds = 0.5,
+    chestSide = sides.north,
+    trashSide = sides.south,
   },
 
   cellCarousel = {

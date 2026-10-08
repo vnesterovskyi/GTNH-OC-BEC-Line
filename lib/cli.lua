@@ -9,7 +9,6 @@ local function usage()
 Usage:
   becctl [--config=path] probe
   becctl [--config=path] status
-  becctl [--config=path] selftest
   becctl [--config=path] lock status|acquire|release [--force]
   becctl [--config=path] gate show|set <fluid...>|clear [--force]
   becctl [--config=path] nanite status|load <tier> [minimum]|unload <tier>
@@ -186,9 +185,6 @@ function cli.run(config, args)
     probe(config)
   elseif command == "status" then
     status(config)
-  elseif command == "selftest" then
-    local simulator = require("lib.simulator")
-    simulator.runSelfTests(controllerClass, config)
   elseif command == "lock" then
     runLock(config, args)
   elseif command == "gate" then
