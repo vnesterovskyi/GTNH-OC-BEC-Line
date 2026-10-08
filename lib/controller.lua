@@ -29,6 +29,8 @@ function controller.new(hardware, config, options)
     environment = hardware.environment,
     journal = options.journal,
     stepMode = options.stepMode == true,
+    lockTimeoutSeconds = options.lockTimeoutSeconds
+      or config.timing.stagingTimeoutSeconds,
     confirm = options.confirm or function() return true end,
     log = options.log or print,
     state = "NEW",
@@ -148,14 +150,16 @@ function controller:reconcile()
 end
 
 function controller:waitForLock()
-  self:setState("LOCKED", "waiting for exactly one lock item")
-  self.hardware.lock:waitForAcquire(self.config.timing.stagingTimeoutSeconds)
+  self:setState("WAITING_FOR_LOCK", "ready for the next batch")
+  self.hardware.lock:waitForAcquire(self.lockTimeoutSeconds)
+  self:setState("LOCKED",
+    tostring(self.hardware.lock:count()) .. " token(s) acquired")
 end
 
 function controller:waitForStagedRecipe()
   self:setState("STAGED", "waiting for a paused recipe")
 
-  return util.waitUntil(self.environment, function()
+  local recipe = util.waitUntil(self.environment, function()
     local state = self.hardware.io.getState()
     self:assertStateUsable(state)
 
@@ -178,6 +182,10 @@ function controller:waitForStagedRecipe()
       .. ", condensate=" .. util.describe(requiredCondensate)
       .. ", tier=" .. util.describe(requiredTier)
   end, self.config.timing.stagingTimeoutSeconds, "a paused staged recipe")
+  local condensates = util.sortedKeys(recipe.condensate)
+  self.log("[RECIPE] first nanite tier T" .. recipe.tier.tier
+    .. "; condensates: " .. util.join(condensates))
+  return recipe
 end
 
 function controller:configureRecipe(recipe)

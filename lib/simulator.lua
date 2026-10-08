@@ -204,6 +204,17 @@ function simulator.build(options)
     }
   end
 
+  function result.stageBatch()
+    assert(state == "idle", "cannot stage while simulator is active")
+    assert(lockCount == 0, "cannot stage with an existing lock")
+    lockCount = 1
+    state = "paused-step"
+    stepIndex = 1
+    providedTier = nil
+    loadedTier = nil
+    naniteStack = nil
+  end
+
   return result
 end
 

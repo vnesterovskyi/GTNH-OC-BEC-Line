@@ -223,6 +223,16 @@ becctl cycle --automatic
 
 The controller processes one locked batch and exits.
 
+For continuous unattended operation:
+
+```sh
+becctl cycle --daemon
+```
+
+Daemon mode waits indefinitely for each new lock, processes batches
+sequentially, and returns to the water-barrier/cells-home state between them.
+The first fault stops the daemon; it never retries blindly.
+
 ## Commands
 
 ```text
@@ -231,7 +241,7 @@ becctl status
 becctl lock status|acquire|release [--force]
 becctl gate show|set <fluid...>|clear [--force]
 becctl nanite status|load <tier> [minimum]|unload <tier>
-becctl cycle --simulate|--step|--automatic
+becctl cycle --simulate|--step|--automatic|--daemon
 ```
 
 ## Recovery

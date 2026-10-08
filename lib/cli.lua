@@ -1,6 +1,7 @@
 local util = require("lib.util")
 local hardwareFactory = require("lib.hardware")
 local controllerClass = require("lib.controller")
+local computer = require("computer")
 
 local cli = {}
 
@@ -12,7 +13,7 @@ Usage:
   becctl [--config=path] lock status|acquire|release [--force]
   becctl [--config=path] gate show|set <fluid...>|clear [--force]
   becctl [--config=path] nanite status|load <tier> [minimum]|unload <tier>
-  becctl [--config=path] cycle --simulate|--step|--automatic
+  becctl [--config=path] cycle --simulate|--step|--automatic|--daemon
 ]])
 end
 
@@ -33,6 +34,37 @@ end
 
 local function printMap(name, value)
   print(name .. ": " .. util.describe(value))
+end
+
+local function timestamp()
+  local seconds = math.floor(computer.uptime())
+  local hours = math.floor(seconds / 3600)
+  local minutes = math.floor((seconds % 3600) / 60)
+  return string.format("%02d:%02d:%02d", hours, minutes, seconds % 60)
+end
+
+local function log(message)
+  print("[" .. timestamp() .. "] " .. message)
+end
+
+local function tierText(tier)
+  if tier == nil then return "none" end
+  return "T" .. tostring(tier.tier) .. " " .. tostring(tier.name)
+end
+
+local function printCarousel(status)
+  local cells = {}
+  for tier = 1, 10 do
+    local cell = status.tiers[tier]
+    cells[#cells + 1] = "T" .. tier .. "=" .. cell.state
+  end
+  print("Nanite cells: " .. table.concat(cells, "  "))
+  print("Nanites available: " .. tostring(status.available))
+  print("Provided tier: " .. tierText(status.providedTier))
+  print("Required tier: " .. tierText(status.requiredTier))
+  print("Loaded tier: " .. (status.loadedTier and ("T" .. status.loadedTier) or "none"))
+  print("Load IO Port: " .. (status.loadPort and status.loadPort.label or "empty"))
+  print("Unload IO Port: " .. (status.unloadPort and status.unloadPort.label or "empty"))
 end
 
 local function safeToMutateIdle(ioNode, force)
@@ -65,16 +97,19 @@ end
 
 local function status(config)
   local hardware = hardwareFactory.build(config)
+  local storage = hardware.storage:status()
   print("IO state: " .. tostring(hardware.io.getState()))
   printMap("Required condensate", hardware.io.getRequiredCondensate())
   printMap("Consumed condensate", hardware.io.getConsumedCondensate())
-  printMap("Required tier", hardware.io.getRequiredTier())
-  printMap("Provided tier", hardware.io.getProvidedTier())
-  print("Available nanites: " .. tostring(hardware.io.getAvailableNanites()))
-  printMap("Gate filters", hardware.gate:get())
-  printMap("Storage", hardware.storage:status())
+  print("Required tier: " .. tierText(hardware.io.getRequiredTier()))
+  print("Provided tier: " .. tierText(hardware.io.getProvidedTier()))
+  print("Gate filters: " .. util.join(hardware.gate:names()))
+  print("Storage: " .. storage.total .. " / " .. storage.fieldStrength .. " L")
+  for _, fluid in ipairs(util.sortedKeys(storage.stored)) do
+    print("  " .. fluid .. ": " .. storage.stored[fluid] .. " L")
+  end
   print("Lock count: " .. hardware.lock:count())
-  printMap("Nanite carousel", hardware.nanites:status())
+  printCarousel(hardware.nanites:status())
   print("Pause asserted: " .. tostring(hardware.pause:isPaused()))
 end
 
@@ -126,7 +161,7 @@ local function runNanite(config, args)
   local hardware = hardwareFactory.build(config)
   local action = args[2]
   if action == "status" then
-    printMap("Nanite carousel", hardware.nanites:status())
+    printCarousel(hardware.nanites:status())
   elseif action == "load" then
     local state = hardware.io.getState()
     if state == "crafting" then
@@ -137,7 +172,7 @@ local function runNanite(config, args)
     if tier > 10 then error("Nanite tier must be between 1 and 10") end
     local count = tonumber(args[4]) or config.cycle.naniteCount
     hardware.nanites:load(tier, count, false)
-    printMap("Nanite carousel", hardware.nanites:status())
+    printCarousel(hardware.nanites:status())
   elseif action == "unload" then
     hardware.pause:setPaused(true)
     local tier = util.requirePositiveInteger(tonumber(args[3]), "Nanite tier")
@@ -151,30 +186,56 @@ local function runNanite(config, args)
 end
 
 local function runCycle(config, args)
-  if contains(args, "--simulate") then
+  local simulate = contains(args, "--simulate")
+  local automatic = contains(args, "--automatic")
+  local step = contains(args, "--step")
+  local daemon = contains(args, "--daemon")
+  local modeCount = (simulate and 1 or 0)
+    + (automatic and 1 or 0)
+    + (step and 1 or 0)
+    + (daemon and 1 or 0)
+  if modeCount ~= 1 then
+    error("Choose exactly one of --simulate, --step, --automatic, or --daemon")
+  end
+
+  if simulate then
     local simulator = require("lib.simulator")
     local simulated = simulator.build()
     local instance = controllerClass.new(simulated, config, {
       journal = simulated.journal,
+      log = log,
     })
     instance:run()
     return
   end
 
-  local automatic = contains(args, "--automatic")
-  local step = contains(args, "--step")
-  if automatic == step then
-    error("Choose exactly one of --step or --automatic")
-  end
-
   local journalClass = require("lib.journal")
   local hardware = hardwareFactory.build(config)
-  local instance = controllerClass.new(hardware, config, {
-    journal = journalClass.new(config.cycle.journalPath),
-    stepMode = step,
-    confirm = confirm,
-  })
-  instance:run()
+  local journal = journalClass.new(config.cycle.journalPath)
+
+  local function runOne(lockTimeoutSeconds)
+    controllerClass.new(hardware, config, {
+      journal = journal,
+      stepMode = step,
+      confirm = confirm,
+      lockTimeoutSeconds = lockTimeoutSeconds,
+      log = log,
+    }):run()
+  end
+
+  if daemon then
+    local batch = 1
+    log("[DAEMON] online; faults stop the process")
+    while true do
+      log("[DAEMON] waiting for batch #" .. batch)
+      runOne(math.huge)
+      log("[DAEMON] batch #" .. batch .. " complete; safe idle")
+      batch = batch + 1
+      os.sleep(config.cycle.betweenBatchesSeconds or 0.25)
+    end
+  else
+    runOne(config.timing.stagingTimeoutSeconds)
+  end
 end
 
 function cli.run(config, args)

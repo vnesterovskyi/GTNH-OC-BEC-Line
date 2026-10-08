@@ -17,6 +17,7 @@ return {
     minParallel = 1,
     maxParallel = 1,
     speedDivisor = 1,
+    betweenBatchesSeconds = 0.25,
     journalPath = "/home/.bec-line.state",
   },
 
