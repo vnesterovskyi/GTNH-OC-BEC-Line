@@ -123,7 +123,9 @@ function util.waitUntil(environment, predicate, timeoutSeconds, description)
       return reason
     end
     lastReason = reason
-    environment.sleep(environment.pollSeconds)
+    if environment.afterObservation then
+      environment.afterObservation()
+    end
   end
 
   local suffix = lastReason and (": " .. tostring(lastReason)) or ""

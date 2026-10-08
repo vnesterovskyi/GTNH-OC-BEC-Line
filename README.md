@@ -6,7 +6,7 @@ Condensate line.
 The controller coordinates:
 
 - a shared Containment Field behind a dynamically filtered Maxwell Gate;
-- an AE2 blocking subnetwork containing exactly one cobblestone lock item;
+- an AE2 blocking subnetwork containing one to four cobblestone lock items;
 - an Observation Array and one IO Node;
 - ten filtered nanite storage cells selected by chest slot;
 - a Transposer between the cell chest and two accelerated ME IO Ports;
@@ -55,6 +55,10 @@ The tested Transposer orientation is:
 - south (`3`): network-to-cell IO Port.
 
 Both IO Ports should contain acceleration cards.
+
+The controller bulk-reads each Transposer inventory once instead of querying
+every slot. Its waits advance through synchronized component observations, so
+low server TPS delays the cycle safely without changing transition ordering.
 
 Chest slots map directly to nanite tiers:
 
@@ -110,8 +114,10 @@ Filtered cobblestone chest
      Item Trash Can
 ```
 
-The Lock Transposer reads the chest directly and moves exactly one cobblestone
-to trash when the completed cycle releases its lock.
+The Lock Transposer snapshots and removes the current batch's one-to-four
+cobblestone tokens. It verifies the exact transfer count but does not require
+the chest to remain empty afterward, because the blocking interface may insert
+the next batch token immediately.
 
 Configure the Teleportation Node Controller Hatch to pause on nanite-step
 transitions.
@@ -137,6 +143,23 @@ Component addresses may be full UUIDs, unique prefixes, or empty when exactly
 one component of that type is visible.
 
 ## Configuration migration
+
+The performance version removes these timing delays:
+
+```text
+timing.operationTimeoutSeconds
+timing.pollSeconds
+timing.completionStableSeconds
+timing.resumePulseSeconds
+cycle.betweenBatchesSeconds
+```
+
+They are no longer used. Completion requires two consecutive synchronized
+`idle` observations by default; override that only when necessary:
+
+```lua
+timing.completionStableChecks = 2
+```
 
 The cell-carousel version removes these old settings:
 

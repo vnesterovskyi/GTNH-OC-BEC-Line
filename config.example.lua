@@ -2,13 +2,10 @@ local sides = require("sides")
 
 return {
   timing = {
-    pollSeconds = 0.25,
-    operationTimeoutSeconds = 30,
     stagingTimeoutSeconds = 120,
     naniteTransferTimeoutSeconds = 60,
     cycleTimeoutSeconds = 86400,
-    completionStableSeconds = 2,
-    resumePulseSeconds = 0.15,
+    completionStableChecks = 2,
   },
 
   cycle = {
@@ -17,7 +14,6 @@ return {
     minParallel = 1,
     maxParallel = 1,
     speedDivisor = 1,
-    betweenBatchesSeconds = 0.25,
     journalPath = "/home/.bec-line.state",
   },
 

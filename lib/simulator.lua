@@ -35,11 +35,9 @@ function simulator.build(options)
   }
 
   local environment = {
-    pollSeconds = 0.01,
-    operationTimeoutSeconds = 1,
-    resumePulseSeconds = 0.01,
     now = function() return clock end,
     sleep = function(seconds) clock = clock + seconds end,
+    afterObservation = function() clock = clock + 0.01 end,
   }
 
   local ioNode = {}
@@ -126,6 +124,10 @@ function simulator.build(options)
     providedTier = nil
     loadedTier = nil
   end
+  function nanites:isReady(tier, count)
+    local available = ioNode.getAvailableNanites()
+    return loadedTier == tier and available >= count, available
+  end
   function nanites:status()
     local tiers = {}
     for tier = 1, 10 do
@@ -150,7 +152,6 @@ function simulator.build(options)
   function pause:isPaused() return paused end
   function pause:resumePulse()
     paused = false
-    environment.sleep(environment.resumePulseSeconds)
     stepIndex = stepIndex + 1
     if stepIndex > #steps then
       state = "idle"
@@ -163,14 +164,14 @@ function simulator.build(options)
   local lock = {}
   function lock:count() return lockCount end
   function lock:assertValid()
-    if lockCount > 1 then error("invalid simulated lock count") end
-    return lockCount == 1
+    return lockCount >= 1
   end
   function lock:waitForAcquire()
-    if lockCount ~= 1 then error("simulated lock is absent") end
+    if lockCount < 1 then error("simulated lock is absent") end
+    return lockCount
   end
   function lock:release()
-    if lockCount ~= 1 then error("simulated lock release failed") end
+    if lockCount < 1 then error("simulated lock release failed") end
     lockCount = 0
   end
 

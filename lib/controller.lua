@@ -39,10 +39,10 @@ function controller.new(hardware, config, options)
   }, controller)
 end
 
-function controller:setState(state, detail)
+function controller:setState(state, detail, persist)
   self.state = state
   self.log("[" .. state .. "]" .. (detail and (" " .. detail) or ""))
-  if self.journal then
+  if persist and self.journal then
     self.journal:save({
       state = state,
       detail = detail,
@@ -114,15 +114,12 @@ function controller:reconcile()
   local state = self.hardware.io.getState()
   self:assertStateUsable(state)
   local lockCount = self.hardware.lock:count()
-  if lockCount > 1 then
-    error("Refusing recovery with " .. lockCount .. " lock items")
-  end
 
-  if activeStates[state] and lockCount ~= 1 then
+  if activeStates[state] and lockCount == 0 then
     error("Active recipe has no lock item; preserving machine in paused state")
   end
 
-  if lockCount == 1
+  if lockCount >= 1
       and state == "idle"
       and self.hardware.io.getRequiredCondensate() == nil
       and previousJournal ~= nil
@@ -131,7 +128,7 @@ function controller:reconcile()
     self:setState("RECOVERED_COMPLETION", "finishing cleanup after interrupted cycle")
     self:cleanup()
     self.recoveredComplete = true
-    return
+    return 0
   end
 
   if lockCount == 0 and state == "idle" then
@@ -147,13 +144,14 @@ function controller:reconcile()
       end)
     end
   end
+  return lockCount
 end
 
 function controller:waitForLock()
   self:setState("WAITING_FOR_LOCK", "ready for the next batch")
-  self.hardware.lock:waitForAcquire(self.lockTimeoutSeconds)
+  local lockCount = self.hardware.lock:waitForAcquire(self.lockTimeoutSeconds)
   self:setState("LOCKED",
-    tostring(self.hardware.lock:count()) .. " token(s) acquired")
+    tostring(lockCount) .. " token(s) acquired", true)
 end
 
 function controller:waitForStagedRecipe()
@@ -194,15 +192,40 @@ function controller:configureRecipe(recipe)
     self.hardware.gate:setExact(recipe.condensate)
   end)
 
-  self.hardware.io.setMinParallel(self.config.cycle.minParallel)
-  self.hardware.io.setMaxParallel(self.config.cycle.maxParallel)
-  self.hardware.io.setSpeedDivisor(self.config.cycle.speedDivisor)
-  if self.hardware.io.getMinParallel() ~= self.config.cycle.minParallel then
-    error("IO Node minimum parallel setting did not apply")
-  elseif self.hardware.io.getMaxParallel() ~= self.config.cycle.maxParallel then
-    error("IO Node maximum parallel setting did not apply")
-  elseif self.hardware.io.getManualSlowdown() ~= self.config.cycle.speedDivisor then
-    error("IO Node speed divisor setting did not apply")
+  local desired = {
+    minParallel = self.config.cycle.minParallel,
+    maxParallel = self.config.cycle.maxParallel,
+    speedDivisor = self.config.cycle.speedDivisor,
+  }
+  local applied = self.hardware.ioSettings
+  if applied == nil
+      or applied.minParallel ~= desired.minParallel
+      or applied.maxParallel ~= desired.maxParallel
+      or applied.speedDivisor ~= desired.speedDivisor then
+    local actualMin = self.hardware.io.getMinParallel()
+    if actualMin ~= desired.minParallel then
+      self.hardware.io.setMinParallel(desired.minParallel)
+      actualMin = self.hardware.io.getMinParallel()
+    end
+    local actualMax = self.hardware.io.getMaxParallel()
+    if actualMax ~= desired.maxParallel then
+      self.hardware.io.setMaxParallel(desired.maxParallel)
+      actualMax = self.hardware.io.getMaxParallel()
+    end
+    local actualSpeed = self.hardware.io.getManualSlowdown()
+    if actualSpeed ~= desired.speedDivisor then
+      self.hardware.io.setSpeedDivisor(desired.speedDivisor)
+      actualSpeed = self.hardware.io.getManualSlowdown()
+    end
+
+    if actualMin ~= desired.minParallel then
+      error("IO Node minimum parallel setting did not apply")
+    elseif actualMax ~= desired.maxParallel then
+      error("IO Node maximum parallel setting did not apply")
+    elseif actualSpeed ~= desired.speedDivisor then
+      error("IO Node speed divisor setting did not apply")
+    end
+    self.hardware.ioSettings = desired
   end
 
   self:setState("NANITE_READY", "loading tier " .. tostring(recipe.tier.tier))
@@ -215,7 +238,7 @@ function controller:configureRecipe(recipe)
         true
       )
       self.currentNaniteTier = recipe.tier.tier
-      self:setState("NANITE_READY", "tier " .. recipe.tier.tier .. " loaded")
+      self:setState("NANITE_READY", "tier " .. recipe.tier.tier .. " loaded", true)
     end
   )
 end
@@ -232,7 +255,7 @@ function controller:swapNanites(requiredTier)
         true
       )
       self.currentNaniteTier = requiredTier.tier
-      self:setState("SWAPPING", "tier " .. requiredTier.tier .. " loaded")
+      self:setState("SWAPPING", "tier " .. requiredTier.tier .. " loaded", true)
     end
   )
 end
@@ -245,7 +268,7 @@ end
 
 function controller:runRecipe(initialTier)
   self.observedActive = true
-  self:setState("RUNNING")
+  self:setState("RUNNING", nil, true)
 
   local recipeSteps = self.hardware.io.getRecipeSteps() or {}
   local maximumBoundaries = math.max(#recipeSteps + 2, 4)
@@ -260,13 +283,13 @@ function controller:runRecipe(initialTier)
     self:assertStateUsable(state)
 
     if state == "idle" then
-      local stableUntil = self.environment.now() + self.config.timing.completionStableSeconds
-      while self.environment.now() < stableUntil do
-        self.environment.sleep(self.environment.pollSeconds)
+      local stableChecks = self.config.timing.completionStableChecks or 2
+      util.requirePositiveInteger(stableChecks, "Completion stable checks")
+      for _ = 2, stableChecks do
         local current = self.hardware.io.getState()
         self:assertStateUsable(current)
         if current ~= "idle" then
-          error("IO Node left idle during completion hold: " .. tostring(current))
+          error("IO Node left idle during completion confirmation: " .. tostring(current))
         end
       end
       return
@@ -274,7 +297,9 @@ function controller:runRecipe(initialTier)
 
     if state == "crafting" then
       self.observedActive = true
-      self.environment.sleep(self.environment.pollSeconds)
+      if self.environment.afterObservation then
+        self.environment.afterObservation()
+      end
     elseif pausedStates[state] or state == "nanite-tier-too-low" then
       self.observedActive = true
       boundaryCount = boundaryCount + 1
@@ -287,12 +312,14 @@ function controller:runRecipe(initialTier)
         error("Paused recipe does not report a required nanite tier")
       end
 
-      local status = self.hardware.nanites:status()
-      local loadedCount = status.available or 0
-      local providedTier = status.providedTier and status.providedTier.tier or nil
-      if requiredTier.tier ~= currentTier
-          or providedTier ~= requiredTier.tier
-          or loadedCount < self.config.cycle.naniteCount then
+      local ready = requiredTier.tier == currentTier
+      if ready then
+        ready = self.hardware.nanites:isReady(
+          requiredTier.tier,
+          self.config.cycle.naniteCount
+        )
+      end
+      if not ready then
         self:swapNanites(requiredTier)
         currentTier = requiredTier.tier
       end
@@ -308,10 +335,10 @@ function controller:runRecipe(initialTier)
 end
 
 function controller:cleanup()
-  self:setState("COMPLETED")
+  self:setState("COMPLETED", nil, true)
   self:pause()
 
-  self:setState("CLEANING", "returning nanites")
+  self:setState("CLEANING", "returning nanites", true)
   self:mutation("return the active nanite cell to its chest slot", function()
     self.hardware.nanites:unload(self.currentNaniteTier)
     self.currentNaniteTier = nil
@@ -333,16 +360,16 @@ function controller:cleanup()
 end
 
 function controller:runInternal()
-  self:reconcile()
+  local lockCount = self:reconcile()
   if self.recoveredComplete then
     return
   end
 
-  if self.hardware.lock:count() == 0 then
+  if lockCount == 0 then
     self:waitForLock()
   else
-    self.hardware.lock:assertValid()
-    self:setState("LOCKED", "existing lock recovered")
+    self:setState("LOCKED",
+      tostring(lockCount) .. " existing token(s) recovered", true)
   end
 
   local recipe = self:waitForStagedRecipe()

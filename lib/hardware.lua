@@ -2,6 +2,18 @@ local util = require("lib.util")
 
 local hardware = {}
 
+local function inventorySnapshot(transposer, side)
+  local snapshot, reason = transposer.getAllStacks(side)
+  if snapshot == nil then
+    error("Cannot inspect inventory on Transposer side " .. side
+      .. ": " .. tostring(reason))
+  elseif type(snapshot.n) ~= "number" then
+    error("Inventory snapshot on Transposer side " .. side
+      .. " does not expose its size")
+  end
+  return snapshot
+end
+
 local function assertMethod(componentApi, address, method)
   local methods = componentApi.methods(address)
   if methods == nil or methods[method] == nil then
@@ -44,11 +56,11 @@ end
 local PauseControl = {}
 PauseControl.__index = PauseControl
 
-function PauseControl.new(proxy, config, environment)
+function PauseControl.new(proxy, ioNode, config)
   return setmetatable({
     proxy = proxy,
+    ioNode = ioNode,
     config = config,
-    environment = environment,
   }, PauseControl)
 end
 
@@ -67,7 +79,9 @@ end
 
 function PauseControl:resumePulse()
   self:setPaused(false)
-  self.environment.sleep(self.environment.resumePulseSeconds)
+  -- Synchronized IO callbacks keep the low pulse visible for a full server tick.
+  self.ioNode.getState()
+  self.ioNode.getState()
   self:setPaused(true)
 end
 
@@ -78,11 +92,15 @@ function Gate.new(proxy, config)
   return setmetatable({
     proxy = proxy,
     blockingFluid = config and config.blockingFluid or "water",
+    cachedFilterCount = nil,
   }, Gate)
 end
 
 function Gate:filterCount()
-  return self.proxy.getCondensateFilterCount()
+  if self.cachedFilterCount == nil then
+    self.cachedFilterCount = self.proxy.getCondensateFilterCount()
+  end
+  return self.cachedFilterCount
 end
 
 function Gate:get()
@@ -193,8 +211,12 @@ end
 function Lock:contents()
   local total = 0
   local sources = {}
+  local inventory = inventorySnapshot(
+    self.transposer,
+    self.config.chestSide
+  )
   for _, slot in ipairs(self.config.chestSlots) do
-    local stack = self.transposer.getStackInSlot(self.config.chestSide, slot)
+    local stack = inventory[slot]
     if not util.isEmptyStack(stack) then
       if not util.itemMatches(stack, self.config.item) then
         error("Lock chest slot " .. slot
@@ -221,9 +243,9 @@ function Lock:assertValid()
 end
 
 function Lock:waitForAcquire(timeoutSeconds)
-  util.waitUntil(self.environment, function()
+  return util.waitUntil(self.environment, function()
     local count = self:count()
-    return count >= 1, "lock count is " .. count
+    return count >= 1, count
   end, timeoutSeconds, "one or more lock items")
 end
 
@@ -246,10 +268,6 @@ function Lock:release()
     end
   end
 
-  util.waitUntil(self.environment, function()
-    local count = self:count()
-    return count == 0, "lock count is " .. count
-  end, self.environment.operationTimeoutSeconds, "lock item removal")
   return true
 end
 
@@ -262,6 +280,9 @@ function CellCarousel.new(transposer, ioNode, config, environment)
     ioNode = ioNode,
     config = config,
     environment = environment,
+    activeSide = nil,
+    activeSlot = nil,
+    knownEmpty = false,
   }, CellCarousel)
 end
 
@@ -281,13 +302,17 @@ function CellCarousel:stack(side, slot)
   return stack
 end
 
-function CellCarousel:findCell(side)
-  local size = self.transposer.getInventorySize(side)
+function CellCarousel:snapshot(side)
+  return inventorySnapshot(self.transposer, side)
+end
+
+function CellCarousel:findCell(side, inventory)
+  inventory = inventory or self:snapshot(side)
   local foundSlot = nil
   local foundStack = nil
 
-  for slot = 1, size do
-    local stack = self:stack(side, slot)
+  for slot = 1, inventory.n do
+    local stack = inventory[slot]
     if stack ~= nil and self:isStorageCell(stack) then
       if foundSlot ~= nil then
         error("Multiple storage cells found on Transposer side " .. side)
@@ -299,12 +324,20 @@ function CellCarousel:findCell(side)
   return foundSlot, foundStack
 end
 
-function CellCarousel:homeCell(tier)
+function CellCarousel:homeCell(tier, chestInventory)
   local slot = self.config.tierSlots[tier]
   if slot == nil then
     return nil, nil
   end
-  local stack = self:stack(self.config.chestSide, slot)
+  local stack
+  if chestInventory then
+    stack = chestInventory[slot]
+    if util.isEmptyStack(stack) then
+      stack = nil
+    end
+  else
+    stack = self:stack(self.config.chestSide, slot)
+  end
   if stack ~= nil and not self:isStorageCell(stack) then
     error("Tier " .. tier .. " chest slot " .. slot .. " contains " .. tostring(stack.label))
   end
@@ -344,22 +377,57 @@ function CellCarousel:waitForNanites(expected, allowOvershoot)
 end
 
 function CellCarousel:hasActiveCell()
-  local loadSlot = self:findCell(self.config.loadPortSide)
-  local unloadSlot = self:findCell(self.config.unloadPortSide)
-  return loadSlot ~= nil or unloadSlot ~= nil or self.ioNode.getAvailableNanites() > 0
+  if self.activeSlot ~= nil then
+    return true
+  end
+
+  local loadSlot = self:findCell(
+    self.config.loadPortSide,
+    self:snapshot(self.config.loadPortSide)
+  )
+  local unloadSlot = self:findCell(
+    self.config.unloadPortSide,
+    self:snapshot(self.config.unloadPortSide)
+  )
+  if loadSlot ~= nil and unloadSlot ~= nil then
+    error("Storage cells are present in both IO Ports")
+  elseif loadSlot ~= nil then
+    self.activeSide = self.config.loadPortSide
+    self.activeSlot = loadSlot
+    return true
+  elseif unloadSlot ~= nil then
+    self.activeSide = self.config.unloadPortSide
+    self.activeSlot = unloadSlot
+    return true
+  end
+
+  local active = self.ioNode.getAvailableNanites() > 0
+  self.knownEmpty = not active
+  return active
 end
 
 function CellCarousel:load(tier, count)
   util.requirePositiveInteger(tier, "Nanite tier")
   util.requirePositiveInteger(count, "Nanite count")
 
-  local loadSlot = self:findCell(self.config.loadPortSide)
-  local unloadSlot = self:findCell(self.config.unloadPortSide)
-  if loadSlot ~= nil or unloadSlot ~= nil or self.ioNode.getAvailableNanites() > 0 then
-    error("Cannot load tier " .. tier .. ": a storage cell or nanites are already active")
+  if not self.knownEmpty then
+    local loadSlot = self:findCell(
+      self.config.loadPortSide,
+      self:snapshot(self.config.loadPortSide)
+    )
+    local unloadSlot = self:findCell(
+      self.config.unloadPortSide,
+      self:snapshot(self.config.unloadPortSide)
+    )
+    if loadSlot ~= nil or unloadSlot ~= nil or self.ioNode.getAvailableNanites() > 0 then
+      error("Cannot load tier " .. tier .. ": a storage cell or nanites are already active")
+    end
   end
 
-  local chestSlot, cell = self:homeCell(tier)
+  local chestSlot, cell = self:homeCell(
+    tier,
+    self:snapshot(self.config.chestSide)
+  )
   if chestSlot == nil then
     error("No chest slot configured for nanite tier " .. tier)
   elseif cell == nil then
@@ -369,22 +437,41 @@ function CellCarousel:load(tier, count)
   self:moveCell(self.config.chestSide, self.config.loadPortSide, chestSlot)
   self:waitForNanites(count, true)
 
-  if self:findCell(self.config.loadPortSide) == nil then
+  local activeSlot = self:findCell(self.config.loadPortSide)
+  if activeSlot == nil then
     error("Tier " .. tier .. " cell disappeared from the load IO Port")
   end
+  self.activeSide = self.config.loadPortSide
+  self.activeSlot = activeSlot
+  self.knownEmpty = false
 end
 
 function CellCarousel:unload(tier)
   util.requirePositiveInteger(tier, "Nanite tier")
-  local chestSlot, homeCell = self:homeCell(tier)
+  local chestInventory = self:snapshot(self.config.chestSide)
+  local chestSlot, homeCell = self:homeCell(tier, chestInventory)
   if chestSlot == nil then
     error("No chest slot configured for nanite tier " .. tier)
   end
 
-  local loadSlot = self:findCell(self.config.loadPortSide)
-  local unloadSlot = self:findCell(self.config.unloadPortSide)
-  if loadSlot ~= nil and unloadSlot ~= nil then
-    error("Storage cells are present in both IO Ports")
+  local loadSlot = nil
+  local unloadSlot = nil
+  if self.activeSide == self.config.loadPortSide then
+    loadSlot = self.activeSlot
+  elseif self.activeSide == self.config.unloadPortSide then
+    unloadSlot = self.activeSlot
+  else
+    loadSlot = self:findCell(
+      self.config.loadPortSide,
+      self:snapshot(self.config.loadPortSide)
+    )
+    unloadSlot = self:findCell(
+      self.config.unloadPortSide,
+      self:snapshot(self.config.unloadPortSide)
+    )
+    if loadSlot ~= nil and unloadSlot ~= nil then
+      error("Storage cells are present in both IO Ports")
+    end
   end
 
   if loadSlot ~= nil then
@@ -398,6 +485,9 @@ function CellCarousel:unload(tier)
     )
   elseif unloadSlot == nil then
     if self.ioNode.getAvailableNanites() == 0 and homeCell ~= nil then
+      self.activeSide = nil
+      self.activeSlot = nil
+      self.knownEmpty = true
       return
     end
     error("Cannot locate the active tier " .. tier .. " storage cell")
@@ -407,9 +497,6 @@ function CellCarousel:unload(tier)
   unloadSlot = self:findCell(self.config.unloadPortSide)
   if unloadSlot == nil then
     error("Tier " .. tier .. " cell disappeared from the unload IO Port")
-  end
-  if self:stack(self.config.chestSide, chestSlot) ~= nil then
-    error("Tier " .. tier .. " home slot " .. chestSlot .. " is occupied")
   end
 
   self:moveCell(
@@ -422,12 +509,16 @@ function CellCarousel:unload(tier)
   if returnedCell == nil then
     error("Tier " .. tier .. " cell did not return to chest slot " .. chestSlot)
   end
+  self.activeSide = nil
+  self.activeSlot = nil
+  self.knownEmpty = true
 end
 
 function CellCarousel:status()
   local tiers = {}
+  local chestInventory = self:snapshot(self.config.chestSide)
   for tier = 1, 10 do
-    local slot, cell = self:homeCell(tier)
+    local slot, cell = self:homeCell(tier, chestInventory)
     tiers[tier] = {
       slot = slot,
       state = cell and "home" or "empty",
@@ -466,8 +557,10 @@ function Nanites:hasActiveCell()
 end
 
 function Nanites:load(tier, count, requireReportedTier)
-  if self:hasActiveCell() then
+  if self.loadedTier ~= nil then
     self:unload(self.loadedTier)
+  elseif self:hasActiveCell() then
+    self:unload()
   end
 
   self.loadedTier = tier
@@ -482,12 +575,16 @@ function Nanites:load(tier, count, requireReportedTier)
 end
 
 function Nanites:unload(tier)
-  if not self:hasActiveCell() then
+  tier = tier or self.loadedTier
+  if tier ~= nil then
+    self.carousel:unload(tier)
+    self.loadedTier = nil
+    return
+  elseif not self:hasActiveCell() then
     self.loadedTier = nil
     return
   end
 
-  tier = tier or self.loadedTier
   local provided = self.ioNode.getProvidedTier()
   tier = tier or (provided and provided.tier or nil)
   if tier == nil then
@@ -496,6 +593,11 @@ function Nanites:unload(tier)
 
   self.carousel:unload(tier)
   self.loadedTier = nil
+end
+
+function Nanites:isReady(tier, count)
+  local available = self.ioNode.getAvailableNanites()
+  return self.loadedTier == tier and available >= count, available
 end
 
 function Nanites:status()
@@ -507,10 +609,7 @@ end
 local function buildEnvironment(config)
   local computer = require("computer")
   return {
-    pollSeconds = config.timing.pollSeconds,
-    operationTimeoutSeconds = config.timing.operationTimeoutSeconds,
     naniteTransferTimeoutSeconds = config.timing.naniteTransferTimeoutSeconds,
-    resumePulseSeconds = config.timing.resumePulseSeconds,
     now = computer.uptime,
     sleep = os.sleep,
   }
@@ -540,10 +639,10 @@ function hardware.build(config)
     "getFieldStrength", "setFieldStrength", "getStoredCondensate",
   })
   local transposer = resolve("cellTransposer", {
-    "getInventorySize", "getStackInSlot", "transferItem",
+    "getAllStacks", "getStackInSlot", "transferItem",
   })
   local lockTransposer = resolve("lockTransposer", {
-    "getInventorySize", "getStackInSlot", "transferItem",
+    "getAllStacks", "transferItem",
   })
   local redstone = resolve("redstone", {
     "getOutput", "setOutput",
@@ -562,7 +661,7 @@ function hardware.build(config)
     io = ioNode,
     gate = Gate.new(gateProxy, config.gateControl),
     storage = Storage.new(storageProxy),
-    pause = PauseControl.new(redstone, config.ioControl, environment),
+    pause = PauseControl.new(redstone, ioNode, config.ioControl),
     lock = Lock.new(lockTransposer, config.lock, environment),
     carousel = carousel,
     nanites = Nanites.new(carousel, ioNode),
@@ -576,7 +675,7 @@ function hardware.buildLock(config, includeIoNode)
     component,
     "lockTransposer",
     config.components.lockTransposer,
-    {"getInventorySize", "getStackInSlot", "transferItem"}
+    {"getAllStacks", "transferItem"}
   )
   local result = {
     environment = environment,

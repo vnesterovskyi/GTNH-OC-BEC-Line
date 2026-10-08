@@ -231,7 +231,6 @@ local function runCycle(config, args)
       runOne(math.huge)
       log("[DAEMON] batch #" .. batch .. " complete; safe idle")
       batch = batch + 1
-      os.sleep(config.cycle.betweenBatchesSeconds or 0.25)
     end
   else
     runOne(config.timing.stagingTimeoutSeconds)
