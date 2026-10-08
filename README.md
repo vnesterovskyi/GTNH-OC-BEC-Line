@@ -19,7 +19,11 @@ This project targets the OpenComputers integration at commit
 
 The IO Node remains paused while condensate routing or nanite cells change.
 The lock is released only after the recipe completes, the active cell returns
-home, and Maxwell Gate filters clear.
+home, and the Maxwell Gate water barrier is restored.
+
+An empty Maxwell Gate filter exposes every condensate. Idle state therefore
+uses `water` as a registered non-condensate sentinel. Recipe execution replaces
+it with the exact required `entangled_*` set, then restores `water`.
 
 Any timeout, missing cell, transfer failure, unexpected machine state, or
 failed postcondition leaves the IO Node paused and the lock present.
@@ -152,6 +156,10 @@ Replace them with:
 ```lua
 timing.naniteTransferTimeoutSeconds = 60
 cycle.naniteCount = 2048 -- use 30720 on RC-1+
+
+gateControl = {
+  blockingFluid = "water",
+}
 
 components.cellTransposer = {
   type = "transposer",

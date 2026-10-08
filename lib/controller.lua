@@ -139,8 +139,8 @@ function controller:reconcile()
         self.currentNaniteTier = nil
       end)
     end
-    if #self.hardware.gate:names() > 0 then
-      self:mutation("clear stale Maxwell Gate filters", function()
+    if not self.hardware.gate:isBlocked() then
+      self:mutation("restore the Maxwell Gate water barrier", function()
         self.hardware.gate:clear()
       end)
     end
@@ -309,7 +309,7 @@ function controller:cleanup()
     self.currentNaniteTier = nil
   end)
 
-  self:mutation("clear Maxwell Gate filters", function()
+  self:mutation("restore the Maxwell Gate water barrier", function()
     self.hardware.gate:clear()
   end)
 

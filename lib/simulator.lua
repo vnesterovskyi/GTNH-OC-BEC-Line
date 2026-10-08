@@ -22,7 +22,7 @@ function simulator.build(options)
   local clock = 0
   local lockCount = options.lockCount or 1
   local paused = true
-  local filters = {}
+  local filters = {"water"}
   local naniteStack = nil
   local providedTier = nil
   local loadedTier = nil
@@ -100,7 +100,10 @@ function simulator.build(options)
     filters = util.sortedKeys(required)
   end
   function gate:clear()
-    filters = {}
+    filters = {"water"}
+  end
+  function gate:isBlocked()
+    return #filters == 1 and filters[1] == "water"
   end
 
   local nanites = {}

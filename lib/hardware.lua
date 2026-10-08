@@ -74,8 +74,11 @@ end
 local Gate = {}
 Gate.__index = Gate
 
-function Gate.new(proxy)
-  return setmetatable({proxy = proxy}, Gate)
+function Gate.new(proxy, config)
+  return setmetatable({
+    proxy = proxy,
+    blockingFluid = config and config.blockingFluid or "water",
+  }, Gate)
 end
 
 function Gate:filterCount()
@@ -144,10 +147,16 @@ function Gate:setExact(required)
 end
 
 function Gate:clear()
-  self.proxy.setCondensateFilters({})
-  if #self:names() ~= 0 then
-    error("Maxwell Gate filters did not clear")
+  self.proxy.setCondensateFilters({[1] = self.blockingFluid})
+  local names = self:names()
+  if #names ~= 1 or names[1] ~= self.blockingFluid then
+    error("Maxwell Gate blocking filter did not apply")
   end
+end
+
+function Gate:isBlocked()
+  local names = self:names()
+  return #names == 1 and names[1] == self.blockingFluid
 end
 
 local Storage = {}
@@ -546,7 +555,7 @@ function hardware.build(config)
     environment = environment,
     metadata = metadata,
     io = ioNode,
-    gate = Gate.new(gateProxy),
+    gate = Gate.new(gateProxy, config.gateControl),
     storage = Storage.new(storageProxy),
     pause = PauseControl.new(redstone, config.ioControl, environment),
     lock = Lock.new(lockTransposer, config.lock, environment),

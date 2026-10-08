@@ -35,6 +35,10 @@ return {
     runningOutput = 0,
   },
 
+  gateControl = {
+    blockingFluid = "water",
+  },
+
   lock = {
     item = {name = "minecraft:cobblestone", damage = 0},
     chestSide = sides.north,

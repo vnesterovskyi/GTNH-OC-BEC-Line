@@ -116,7 +116,7 @@ local function runGate(config, args)
   elseif action == "clear" then
     safeToMutateIdle(hardware.io, contains(args, "--force"))
     hardware.gate:clear()
-    print("Gate filters cleared")
+    print("Gate water barrier restored")
   else
     error("Expected: gate show|set|clear")
   end
