@@ -165,8 +165,11 @@ function controller:waitForStagedRecipe()
     local requiredTier = self.hardware.io.getRequiredTier()
     local safePause = pausedStates[state] or state == "nanite-tier-too-low"
 
-    if state == "crafting" and not safePause then
-      error("Recipe began crafting before routing and nanites were prepared")
+    if state == "crafting" then
+      if not self.hardware.pause:isPaused() then
+        error("Recipe began crafting before routing without the pause signal asserted")
+      end
+      return false, "recipe is entering its first paused boundary"
     end
 
     if requiredCondensate ~= nil and requiredTier ~= nil and safePause then

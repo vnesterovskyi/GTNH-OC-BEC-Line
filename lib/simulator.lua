@@ -33,6 +33,8 @@ function simulator.build(options)
     neutronium = 144,
     infinity = 144,
   }
+  local stateReads = 0
+  local stagingCraftingReads = options.stagingCraftingReads or 0
 
   local environment = {
     now = function() return clock end,
@@ -76,6 +78,10 @@ function simulator.build(options)
     return result
   end
   function ioNode.getState()
+    stateReads = stateReads + 1
+    if stateReads > 1 and stateReads <= stagingCraftingReads + 1 then
+      return "crafting"
+    end
     return state
   end
   function ioNode.getMinParallel() return 1 end
