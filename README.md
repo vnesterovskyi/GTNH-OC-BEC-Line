@@ -647,6 +647,7 @@ becctl cycle --daemon
 Daemon mode:
 
 - waits indefinitely for the next lock;
+- waits indefinitely for the corresponding paused recipe after a lock arrives;
 - processes batches sequentially;
 - accepts one to four current-batch tokens;
 - allows the next token to arrive immediately after release;
@@ -918,6 +919,15 @@ OpenOS has cached old modules. Reboot after running `becinstall`.
 This is intentional after any fault. Read the first error, correct its cause,
 restore safe idle, and restart the daemon manually. Do not wrap it in an
 unconditional retry loop.
+
+### Lock exists but the IO Node remains idle
+
+In daemon mode this is a safe waiting state. The controller keeps the lock,
+pause signal, cells-home state, and Maxwell Gate water barrier unchanged until
+the corresponding recipe reaches a paused boundary. Check the upstream AE
+craft if the wait is unexpected. One-shot `--automatic` and `--step` modes
+still use `timing.stagingTimeoutSeconds` and will fault if staging takes too
+long.
 
 ### Log briefly shows `crafting` before `[ROUTED]`
 

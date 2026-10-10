@@ -31,6 +31,8 @@ function controller.new(hardware, config, options)
     stepMode = options.stepMode == true,
     lockTimeoutSeconds = options.lockTimeoutSeconds
       or config.timing.stagingTimeoutSeconds,
+    stagingTimeoutSeconds = options.stagingTimeoutSeconds
+      or config.timing.stagingTimeoutSeconds,
     confirm = options.confirm or function() return true end,
     log = options.log or print,
     state = "NEW",
@@ -182,7 +184,7 @@ function controller:waitForStagedRecipe()
     return false, "state=" .. tostring(state)
       .. ", condensate=" .. util.describe(requiredCondensate)
       .. ", tier=" .. util.describe(requiredTier)
-  end, self.config.timing.stagingTimeoutSeconds, "a paused staged recipe")
+  end, self.stagingTimeoutSeconds, "a paused staged recipe")
   local condensates = util.sortedKeys(recipe.condensate)
   self.log("[RECIPE] first nanite tier T" .. recipe.tier.tier
     .. "; condensates: " .. util.join(condensates))

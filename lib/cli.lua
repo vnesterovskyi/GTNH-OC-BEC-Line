@@ -213,12 +213,13 @@ local function runCycle(config, args)
   local hardware = hardwareFactory.build(config)
   local journal = journalClass.new(config.cycle.journalPath)
 
-  local function runOne(lockTimeoutSeconds)
+  local function runOne(lockTimeoutSeconds, stagingTimeoutSeconds)
     controllerClass.new(hardware, config, {
       journal = journal,
       stepMode = step,
       confirm = confirm,
       lockTimeoutSeconds = lockTimeoutSeconds,
+      stagingTimeoutSeconds = stagingTimeoutSeconds,
       log = log,
     }):run()
   end
@@ -228,12 +229,15 @@ local function runCycle(config, args)
     log("[DAEMON] online; faults stop the process")
     while true do
       log("[DAEMON] waiting for batch #" .. batch)
-      runOne(math.huge)
+      runOne(math.huge, math.huge)
       log("[DAEMON] batch #" .. batch .. " complete; safe idle")
       batch = batch + 1
     end
   else
-    runOne(config.timing.stagingTimeoutSeconds)
+    runOne(
+      config.timing.stagingTimeoutSeconds,
+      config.timing.stagingTimeoutSeconds
+    )
   end
 end
 
