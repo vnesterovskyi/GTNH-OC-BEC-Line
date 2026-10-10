@@ -275,15 +275,11 @@ function controller:runRecipe(initialTier)
   self.observedActive = true
   self:setState("RUNNING", nil, true)
 
-  local recipeSteps = self.hardware.io.getRecipeSteps() or {}
-  local maximumBoundaries = math.max(#recipeSteps + 2, 4)
-  local boundaryCount = 0
   local currentTier = initialTier.tier
-  local deadline = self.environment.now() + self.config.timing.cycleTimeoutSeconds
 
   self:resumeAtBoundary()
 
-  while self.environment.now() <= deadline do
+  while true do
     local state = self.hardware.io.getState()
     self:assertStateUsable(state)
 
@@ -307,10 +303,6 @@ function controller:runRecipe(initialTier)
       end
     elseif pausedStates[state] or state == "nanite-tier-too-low" then
       self.observedActive = true
-      boundaryCount = boundaryCount + 1
-      if boundaryCount > maximumBoundaries then
-        error("Observed more pause boundaries than recipe steps; check Controller Hatch mode")
-      end
 
       local requiredTier = self.hardware.io.getRequiredTier()
       if requiredTier == nil then
@@ -335,8 +327,6 @@ function controller:runRecipe(initialTier)
       error("Unexpected IO Node state while running: " .. tostring(state))
     end
   end
-
-  error("Cycle exceeded timeout of " .. self.config.timing.cycleTimeoutSeconds .. " seconds")
 end
 
 function controller:cleanup()

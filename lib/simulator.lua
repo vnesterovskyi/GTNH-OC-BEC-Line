@@ -65,18 +65,6 @@ function simulator.build(options)
   function ioNode.getAvailableNanites()
     return naniteStack and naniteStack.size or 0
   end
-  function ioNode.getRecipeSteps()
-    local result = {}
-    for index, tier in ipairs(steps) do
-      result[index] = {
-        nanite = {name = "T" .. tier, tier = tier},
-        start = index - 1,
-        ["end"] = index,
-        index = index,
-      }
-    end
-    return result
-  end
   function ioNode.getState()
     stateReads = stateReads + 1
     if stateReads > 1 and stateReads <= stagingCraftingReads + 1 then

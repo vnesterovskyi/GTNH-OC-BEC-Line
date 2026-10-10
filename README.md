@@ -313,7 +313,6 @@ return {
   timing = {
     stagingTimeoutSeconds = 120,
     naniteTransferTimeoutSeconds = 60,
-    cycleTimeoutSeconds = 86400,
     completionStableChecks = 2,
   },
 
@@ -398,7 +397,6 @@ return {
 |---|---|
 | `timing.stagingTimeoutSeconds` | Maximum game-time wait for a lock or staged paused recipe in one-shot mode. |
 | `timing.naniteTransferTimeoutSeconds` | Maximum game-time wait for the IO Node's available nanite count to reach the expected value. |
-| `timing.cycleTimeoutSeconds` | Maximum game-time duration of one active recipe. |
 | `timing.completionStableChecks` | Consecutive synchronized `idle` observations required before cleanup. |
 | `cycle.naniteCount` | Minimum nanites that must become available after loading a cell. |
 | `cycle.minParallel` | IO Node minimum parallel setting. |
@@ -650,6 +648,8 @@ Daemon mode:
 - waits indefinitely for the corresponding paused recipe after a lock arrives;
 - processes batches sequentially;
 - accepts one to four current-batch tokens;
+- supports multiplied patterns whose individual recipes execute serially;
+- keeps an active batch running until the IO Node reaches `idle` or reports a fault;
 - allows the next token to arrive immediately after release;
 - restores cells home and the water barrier between batches;
 - stops permanently on the first fault.
@@ -956,6 +956,7 @@ Obsolete timing fields from earlier versions are ignored and may be removed:
 ```text
 timing.operationTimeoutSeconds
 timing.pollSeconds
+timing.cycleTimeoutSeconds
 timing.completionStableSeconds
 timing.resumePulseSeconds
 cycle.betweenBatchesSeconds
