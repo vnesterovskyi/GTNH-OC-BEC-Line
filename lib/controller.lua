@@ -191,6 +191,54 @@ function controller:waitForStagedRecipe()
   return recipe
 end
 
+local function missingCondensate(required, stored)
+  local missing = {}
+  for name, amount in pairs(required or {}) do
+    local available = stored[name] or 0
+    if available < amount then
+      missing[name] = {
+        available = available,
+        required = amount,
+        missing = amount - available,
+      }
+    end
+  end
+  return missing
+end
+
+local function describeMissingCondensate(missing)
+  local parts = {}
+  for _, name in ipairs(util.sortedKeys(missing)) do
+    local deficit = missing[name]
+    parts[#parts + 1] = name
+      .. " missing " .. tostring(deficit.missing) .. " L"
+      .. " (" .. tostring(deficit.available)
+      .. "/" .. tostring(deficit.required) .. ")"
+  end
+  return util.join(parts, "; ")
+end
+
+function controller:waitForCondensate(required)
+  local lastDetail = nil
+  self:setState("WAITING_FOR_CONDENSATE", "checking shared storage")
+
+  util.waitUntil(self.environment, function()
+    local missing = missingCondensate(required, self.hardware.storage:stored())
+    if next(missing) == nil then
+      return true
+    end
+
+    local detail = describeMissingCondensate(missing)
+    if detail ~= lastDetail then
+      self.log("[WAITING_FOR_CONDENSATE] " .. detail)
+      lastDetail = detail
+    end
+    return false, detail
+  end, math.huge, "all condensate required by the staged recipe")
+
+  self.log("[CONDENSATE_READY] full recipe requirement is stored")
+end
+
 function controller:configureRecipe(recipe)
   self:setState("ROUTED", "programming Maxwell Gate")
   self:mutation("program exact condensate filters", function()
@@ -368,6 +416,7 @@ function controller:runInternal()
   end
 
   local recipe = self:waitForStagedRecipe()
+  self:waitForCondensate(recipe.condensate)
   self:configureRecipe(recipe)
   self:runRecipe(recipe.tier)
   self:cleanup()

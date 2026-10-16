@@ -38,10 +38,12 @@ The design is fail-closed:
 2. The Maxwell Gate exposes only the exact condensates required by the active
    recipe.
 3. Idle state uses `water` as a registered non-condensate blocking filter.
-4. The active nanite cell must return to its fixed chest slot before cleanup
+4. A staged recipe remains paused with the Gate blocked and nanites home until
+   shared storage contains its full condensate requirement.
+5. The active nanite cell must return to its fixed chest slot before cleanup
    continues.
-5. The water barrier must be restored before the lock is released.
-6. Any timeout, invalid inventory, missing cell, transfer failure, unexpected
+6. The water barrier must be restored before the lock is released.
+7. Any timeout, invalid inventory, missing cell, transfer failure, unexpected
    IO state, or failed postcondition stops the daemon with the IO Node paused.
 
 An empty Maxwell Gate filter exposes every condensate. Never use an empty
@@ -666,6 +668,8 @@ Normal lifecycle:
 [WAITING_FOR_LOCK] ready for the next batch
 [LOCKED] ... token(s) acquired
 [STAGED] waiting for a paused recipe
+[WAITING_FOR_CONDENSATE] checking shared storage
+[CONDENSATE_READY] full recipe requirement is stored
 [ROUTED] programming Maxwell Gate
 [NANITE_READY] ...
 [RUNNING]
@@ -684,6 +688,8 @@ unattended.
 
 - [ ] No recipe starts before a lock exists.
 - [ ] Only the required condensates appear in the Gate during a recipe.
+- [ ] Recipes with ad-hoc condensate delivery remain paused until their full
+      requirement appears in shared storage.
 - [ ] The idle Gate filter is always `water`.
 - [ ] Exactly one nanite cell is away from home during a recipe.
 - [ ] Both IO Ports are empty between batches.
@@ -928,6 +934,15 @@ the corresponding recipe reaches a paused boundary. Check the upstream AE
 craft if the wait is unexpected. One-shot `--automatic` and `--step` modes
 still use `timing.stagingTimeoutSeconds` and will fault if staging takes too
 long.
+
+### Recipe waits in `WAITING_FOR_CONDENSATE`
+
+This is a safe admission wait, not a fault. The IO Node has accepted and
+reported the recipe, but shared BEC storage does not yet contain its full
+condensate requirement. The controller keeps the Gate blocked with `water`,
+leaves nanites home, preserves the lock, and waits indefinitely. The log lists
+the exact missing litres for each condensate. Supply the fluids and the cycle
+continues automatically.
 
 ### Log briefly shows `crafting` before `[ROUTED]`
 

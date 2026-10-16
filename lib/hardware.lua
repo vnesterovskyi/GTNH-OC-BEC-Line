@@ -184,8 +184,12 @@ function Storage.new(proxy)
   return setmetatable({proxy = proxy}, Storage)
 end
 
+function Storage:stored()
+  return self.proxy.getStoredCondensate() or {}
+end
+
 function Storage:status()
-  local stored = self.proxy.getStoredCondensate() or {}
+  local stored = self:stored()
   local total = 0
   for _, amount in pairs(stored) do
     total = total + amount

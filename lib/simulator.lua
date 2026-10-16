@@ -33,6 +33,10 @@ function simulator.build(options)
     neutronium = 144,
     infinity = 144,
   }
+  local storedCondensate = options.storedCondensate
+    or util.copy(requiredCondensate)
+  local storageReadyAfterReads = options.storageReadyAfterReads or 0
+  local storageReads = 0
   local stateReads = 0
   local stagingCraftingReads = options.stagingCraftingReads or 0
 
@@ -88,6 +92,9 @@ function simulator.build(options)
   function gate:setExact(required)
     if options.failGate then
       error("simulated gate failure")
+    elseif options.rejectEarlyRouting
+        and storageReads <= storageReadyAfterReads then
+      error("gate configured before condensate was ready")
     end
     filters = util.sortedKeys(required)
   end
@@ -106,6 +113,10 @@ function simulator.build(options)
     return naniteStack ~= nil
   end
   function nanites:load(tier, count)
+    if options.rejectEarlyRouting
+        and storageReads <= storageReadyAfterReads then
+      error("nanites loaded before condensate was ready")
+    end
     if naniteStack ~= nil then
       self:unload(loadedTier)
     end
@@ -170,8 +181,18 @@ function simulator.build(options)
   end
 
   local storage = {}
+  function storage:stored()
+    storageReads = storageReads + 1
+    if storageReads <= storageReadyAfterReads then
+      return {}
+    end
+    return util.copy(storedCondensate)
+  end
   function storage:status()
-    return {fieldStrength = 1000000, stored = util.copy(requiredCondensate), total = 288}
+    local stored = self:stored()
+    local total = 0
+    for _, amount in pairs(stored) do total = total + amount end
+    return {fieldStrength = 1000000, stored = stored, total = total}
   end
 
   local result = {
@@ -196,6 +217,7 @@ function simulator.build(options)
       providedTier = providedTier,
       loadedTier = loadedTier,
       stepIndex = stepIndex,
+      storageReads = storageReads,
     }
   end
 
