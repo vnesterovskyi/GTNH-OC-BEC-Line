@@ -197,7 +197,7 @@ when an active recipe requests a missing tier.
 ```text
 AE2 batch automation
          |
-Filtered lock inventory
+Filtered lock chest
          |
    Lock Transposer
          |
@@ -216,8 +216,7 @@ network allows empty nanite cells to absorb lock cobblestone.
 
 External recipe automation must:
 
-1. Deposit one or more cobblestone tokens in the configured lock inventory
-   slots.
+1. Deposit one or more cobblestone tokens in the lock chest.
 2. Stage the corresponding BEC recipe while the token keeps the next batch
    blocked.
 3. Leave the token in place until the controller finishes.
@@ -371,7 +370,6 @@ return {
   lock = {
     item = {name = "minecraft:cobblestone", damage = 0},
     chestSide = sides.north,
-    chestSlots = {1, 2, 3, 4},
     trashSide = sides.south,
   },
 
@@ -414,7 +412,7 @@ return {
 | `ioControl.runningOutput` | Output used to release a boundary. |
 | `gateControl.blockingFluid` | Registered non-condensate fluid used as the idle barrier. |
 | `lock.chestSide` | Lock Transposer side facing the lock chest. |
-| `lock.chestSlots` | Chest slots included in one batch lock. |
+| `lock.chestSlots` | Optional explicit slot subset. Omit it to scan from slot 1 through the first empty slot. |
 | `lock.trashSide` | Lock Transposer side facing the Item Trash Can. |
 | `cellCarousel.chestSide` | Cell Transposer side facing the cell chest. |
 | `cellCarousel.loadPortSide` | Side facing the cell-to-network IO Port. |
@@ -531,11 +529,14 @@ With the IO Node idle:
    ```
 
 5. Confirm the cobblestone enters the Item Trash Can and the chest clears.
-6. Repeat with more than one stack of tokens. JABBA barrels expose their
-   extraction inventory as Lua slot 2, so configure `chestSlots = {2}`. To
-   expose more than one stack through the standard inventory API, also set
-   `experimental.B:exposeFullStorageSize=true` in `config/JABBA.cfg` and
-   restart the server.
+6. Repeat with more than one stack of tokens. AE2 should fill the chest
+   contiguously from slot 1; automatic scanning stops at the first empty slot.
+
+JABBA barrels and other deep-storage inventories are not supported for the
+lock. They expose virtual insertion/extraction slots and may cap the visible
+stack count, which violates the controller's snapshot assumptions. Use a
+regular chest or another inventory that reports every slot and stack count
+truthfully through the standard inventory API.
 
 The Trash Can may report many empty slots through the Transposer API; that is
 normal. The important check is that the exact captured token count moves.

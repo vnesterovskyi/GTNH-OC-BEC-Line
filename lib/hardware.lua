@@ -219,7 +219,8 @@ function Lock:contents()
     self.transposer,
     self.config.chestSide
   )
-  for _, slot in ipairs(self.config.chestSlots) do
+
+  local function inspectSlot(slot)
     local stack = inventory[slot]
     if not util.isEmptyStack(stack) then
       if not util.itemMatches(stack, self.config.item) then
@@ -235,6 +236,20 @@ function Lock:contents()
       sources[#sources + 1] = {slot = slot, count = count}
     end
   end
+
+  if self.config.chestSlots ~= nil then
+    for _, slot in ipairs(self.config.chestSlots) do
+      inspectSlot(slot)
+    end
+  else
+    for slot = 1, inventory.n do
+      if util.isEmptyStack(inventory[slot]) then
+        break
+      end
+      inspectSlot(slot)
+    end
+  end
+
   return total, sources
 end
 
