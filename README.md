@@ -235,9 +235,10 @@ Connect the configured redstone output side to that hatch:
 - output `15`: paused/armed;
 - output `0`: release the current boundary.
 
-The controller lowers the signal, performs two synchronized IO-state
-observations, then raises it again. This gives the server a complete tick to
-observe the low signal without relying on wall-clock timing.
+The controller lowers the signal, performs one synchronized IO-state
+observation, then raises it again. This gives the server one complete tick to
+observe the low signal without allowing a fast serial recipe wave to begin
+before pause is re-armed.
 
 ## OpenComputers installation
 

@@ -79,8 +79,7 @@ end
 
 function PauseControl:resumePulse()
   self:setPaused(false)
-  -- Synchronized IO callbacks keep the low pulse visible for a full server tick.
-  self.ioNode.getState()
+  -- One synchronized IO callback exposes the low signal for one server tick.
   self.ioNode.getState()
   self:setPaused(true)
 end
