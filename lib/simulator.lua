@@ -36,6 +36,7 @@ function simulator.build(options)
   local storedCondensate = options.storedCondensate
     or util.copy(requiredCondensate)
   local storageReadyAfterReads = options.storageReadyAfterReads or 0
+  local freshRecipeSteps = options.freshRecipeSteps or {}
   local storageReads = 0
   local stateReads = 0
   local stagingCraftingReads = options.stagingCraftingReads or 0
@@ -54,7 +55,17 @@ function simulator.build(options)
     return util.copy(requiredCondensate)
   end
   function ioNode.getConsumedCondensate()
-    return {}
+    if state == "idle" then
+      return nil
+    elseif freshRecipeSteps[stepIndex] then
+      return {}
+    end
+    local consumed = {}
+    local first = util.sortedKeys(requiredCondensate)[1]
+    if first ~= nil then
+      consumed[first] = 1
+    end
+    return consumed
   end
   function ioNode.getProvidedTier()
     return providedTier and {name = "T" .. providedTier, tier = providedTier} or nil
@@ -183,6 +194,9 @@ function simulator.build(options)
   local storage = {}
   function storage:stored()
     storageReads = storageReads + 1
+    if options.storedCondensateForRead then
+      return util.copy(options.storedCondensateForRead(storageReads))
+    end
     if storageReads <= storageReadyAfterReads then
       return {}
     end

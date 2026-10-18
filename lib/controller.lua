@@ -218,6 +218,15 @@ local function describeMissingCondensate(missing)
   return util.join(parts, "; ")
 end
 
+local function hasConsumedCondensate(consumed)
+  for _, amount in pairs(consumed or {}) do
+    if amount > 0 then
+      return true
+    end
+  end
+  return false
+end
+
 function controller:waitForCondensate(required)
   local lastDetail = nil
   self:setState("WAITING_FOR_CONDENSATE", "checking shared storage")
@@ -351,6 +360,14 @@ function controller:runRecipe(initialTier)
       end
     elseif pausedStates[state] or state == "nanite-tier-too-low" then
       self.observedActive = true
+
+      local requiredCondensate = self.hardware.io.getRequiredCondensate()
+      local consumedCondensate = self.hardware.io.getConsumedCondensate()
+      if requiredCondensate ~= nil
+          and next(requiredCondensate) ~= nil
+          and not hasConsumedCondensate(consumedCondensate) then
+        self:waitForCondensate(requiredCondensate)
+      end
 
       local requiredTier = self.hardware.io.getRequiredTier()
       if requiredTier == nil then

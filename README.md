@@ -40,10 +40,12 @@ The design is fail-closed:
 3. Idle state uses `water` as a registered non-condensate blocking filter.
 4. A staged recipe remains paused with the Gate blocked and nanites home until
    shared storage contains its full condensate requirement.
-5. The active nanite cell must return to its fixed chest slot before cleanup
+5. Buffered inputs that exceed IO Node parallelism are admitted one serial
+   recipe wave at a time; every fresh wave repeats the storage check.
+6. The active nanite cell must return to its fixed chest slot before cleanup
    continues.
-6. The water barrier must be restored before the lock is released.
-7. Any timeout, invalid inventory, missing cell, transfer failure, unexpected
+7. The water barrier must be restored before the lock is released.
+8. Any timeout, invalid inventory, missing cell, transfer failure, unexpected
    IO state, or failed postcondition stops the daemon with the IO Node paused.
 
 An empty Maxwell Gate filter exposes every condensate. Never use an empty
@@ -529,8 +531,11 @@ With the IO Node idle:
    ```
 
 5. Confirm the cobblestone enters the Item Trash Can and the chest clears.
-6. Repeat with more than one stack of tokens. For a one-slot barrel, configure
-   `chestSlots = {1}`.
+6. Repeat with more than one stack of tokens. JABBA barrels expose their
+   extraction inventory as Lua slot 2, so configure `chestSlots = {2}`. To
+   expose more than one stack through the standard inventory API, also set
+   `experimental.B:exposeFullStorageSize=true` in `config/JABBA.cfg` and
+   restart the server.
 
 The Trash Can may report many empty slots through the Transposer API; that is
 normal. The important check is that the exact captured token count moves.
@@ -940,10 +945,12 @@ long.
 
 This is a safe admission wait, not a fault. The IO Node has accepted and
 reported the recipe, but shared BEC storage does not yet contain its full
-condensate requirement. The controller keeps the Gate blocked with `water`,
-leaves nanites home, preserves the lock, and waits indefinitely. The log lists
-the exact missing litres for each condensate. Supply the fluids and the cycle
-continues automatically.
+condensate requirement. During initial admission, the controller keeps the Gate
+blocked with `water` and leaves nanites home. During a later serial wave, it
+keeps the IO Node paused with the current exact Gate filters. In both cases the
+lock is preserved and the wait is indefinite. The log lists the exact missing
+litres for each condensate. Supply the fluids and the cycle continues
+automatically.
 
 ### Log briefly shows `crafting` before `[ROUTED]`
 
