@@ -223,16 +223,17 @@ function Lock:contents()
     local stack = inventory[slot]
     if not util.isEmptyStack(stack) then
       if not util.itemMatches(stack, self.config.item) then
-        error("Lock chest slot " .. slot
+        error("Lock inventory slot " .. slot
           .. " contains unexpected item " .. tostring(stack.label))
       end
       local count = stack.size or 0
+      if type(count) ~= "number" or count < 1 or count ~= math.floor(count) then
+        error("Lock inventory slot " .. slot
+          .. " reports invalid item count " .. tostring(count))
+      end
       total = total + count
       sources[#sources + 1] = {slot = slot, count = count}
     end
-  end
-  if total > self.config.maxTokens then
-    error("Lock chest contains " .. total .. " tokens; maximum is " .. self.config.maxTokens)
   end
   return total, sources
 end
@@ -260,15 +261,21 @@ function Lock:release()
   end
 
   for _, source in ipairs(sources) do
-    local moved, reason = self.transposer.transferItem(
-      self.config.chestSide,
-      self.config.trashSide,
-      source.count,
-      source.slot
-    )
-    if moved ~= source.count then
-      error("Lock Transposer moved " .. tostring(moved)
-        .. " of " .. source.count .. " tokens: " .. tostring(reason))
+    local remaining = source.count
+    while remaining > 0 do
+      local requested = math.min(remaining, 64)
+      local moved, reason = self.transposer.transferItem(
+        self.config.chestSide,
+        self.config.trashSide,
+        requested,
+        source.slot
+      )
+      if type(moved) ~= "number" or moved < 1 or moved > requested then
+        error("Lock Transposer moved " .. tostring(moved)
+          .. " of requested " .. requested .. " tokens from slot "
+          .. source.slot .. ": " .. tostring(reason))
+      end
+      remaining = remaining - moved
     end
   end
 

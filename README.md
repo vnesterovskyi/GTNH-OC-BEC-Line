@@ -8,7 +8,7 @@ The controller coordinates:
 - exact Maxwell Gate condensate routing;
 - tiered nanite storage-cell loading and unloading;
 - Teleportation Node Controller Hatch pause/resume transitions;
-- one-to-four AE2 lock tokens per batch;
+- any positive number of AE2 lock tokens per batch;
 - crash recovery and safe cleanup;
 - one-shot or continuous unattended operation.
 
@@ -195,7 +195,7 @@ when an active recipe requests a missing tier.
 ```text
 AE2 batch automation
          |
-Filtered lock chest, slots 1-4
+Filtered lock inventory
          |
    Lock Transposer
          |
@@ -214,14 +214,16 @@ network allows empty nanite cells to absorb lock cobblestone.
 
 External recipe automation must:
 
-1. Deposit one to four cobblestone tokens in lock chest slots 1-4.
+1. Deposit one or more cobblestone tokens in the configured lock inventory
+   slots.
 2. Stage the corresponding BEC recipe while the token keeps the next batch
    blocked.
 3. Leave the token in place until the controller finishes.
 
-At completion, the Lock Transposer captures and removes the current tokens.
-The next batch may insert a new token immediately; the controller does not
-require the chest to remain empty after release.
+At completion, the Lock Transposer snapshots and removes the current token
+count. Transfers occur in 64-item chunks, but stop after exactly the captured
+count. The next batch may insert new tokens immediately, including into the
+same slot; the controller does not require the inventory to remain empty.
 
 ### Controller Hatch and redstone
 
@@ -368,7 +370,6 @@ return {
     item = {name = "minecraft:cobblestone", damage = 0},
     chestSide = sides.north,
     chestSlots = {1, 2, 3, 4},
-    maxTokens = 4,
     trashSide = sides.south,
   },
 
@@ -412,7 +413,6 @@ return {
 | `gateControl.blockingFluid` | Registered non-condensate fluid used as the idle barrier. |
 | `lock.chestSide` | Lock Transposer side facing the lock chest. |
 | `lock.chestSlots` | Chest slots included in one batch lock. |
-| `lock.maxTokens` | Maximum total token count accepted. |
 | `lock.trashSide` | Lock Transposer side facing the Item Trash Can. |
 | `cellCarousel.chestSide` | Cell Transposer side facing the cell chest. |
 | `cellCarousel.loadPortSide` | Side facing the cell-to-network IO Port. |
@@ -529,7 +529,8 @@ With the IO Node idle:
    ```
 
 5. Confirm the cobblestone enters the Item Trash Can and the chest clears.
-6. Repeat with tokens distributed across slots 1-4.
+6. Repeat with more than one stack of tokens. For a one-slot barrel, configure
+   `chestSlots = {1}`.
 
 The Trash Can may report many empty slots through the Transposer API; that is
 normal. The important check is that the exact captured token count moves.
@@ -649,7 +650,7 @@ Daemon mode:
 - waits indefinitely for the next lock;
 - waits indefinitely for the corresponding paused recipe after a lock arrives;
 - processes batches sequentially;
-- accepts one to four current-batch tokens;
+- accepts any positive current-batch token count;
 - supports multiplied patterns whose individual recipes execute serially;
 - keeps an active batch running until the IO Node reaches `idle` or reports a fault;
 - allows the next token to arrive immediately after release;
