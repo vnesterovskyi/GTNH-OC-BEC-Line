@@ -653,7 +653,7 @@ function hardware.build(config)
 
   local ioNode = resolve("ioNode", {
     "getRequiredCondensate", "getConsumedCondensate", "getProvidedTier",
-    "getRequiredTier", "getAvailableNanites", "getState",
+    "getRequiredTier", "getAvailableNanites", "getState", "isWorkAllowed",
     "getMinParallel", "getMaxParallel", "getManualSlowdown",
     "setMinParallel", "setMaxParallel", "setSpeedDivisor",
   })

@@ -29,6 +29,7 @@ function simulator.build(options)
   local stepIndex = 1
   local steps = options.steps or {1, 2, 1}
   local state = options.state or "paused-step"
+  local workAllowed = options.workAllowed ~= false
   local requiredCondensate = options.requiredCondensate or {
     neutronium = 144,
     infinity = 144,
@@ -38,6 +39,7 @@ function simulator.build(options)
   local storageReadyAfterReads = options.storageReadyAfterReads or 0
   local freshRecipeSteps = options.freshRecipeSteps or {}
   local storageReads = 0
+  local routeChanges = 0
   local stateReads = 0
   local stagingCraftingReads = options.stagingCraftingReads or 0
 
@@ -51,6 +53,8 @@ function simulator.build(options)
   function ioNode.getRequiredCondensate()
     if state == "idle" then
       return nil
+    elseif options.requiredCondensateForStep then
+      return util.copy(options.requiredCondensateForStep(stepIndex))
     end
     return util.copy(requiredCondensate)
   end
@@ -89,6 +93,7 @@ function simulator.build(options)
     end
     return state
   end
+  function ioNode.isWorkAllowed() return workAllowed end
   function ioNode.getMinParallel() return 1 end
   function ioNode.getMaxParallel() return 1 end
   function ioNode.getManualSlowdown() return 1 end
@@ -109,6 +114,7 @@ function simulator.build(options)
         and storageReads <= storageReadyAfterReads then
       error("gate configured before condensate was ready")
     end
+    routeChanges = routeChanges + 1
     filters = util.sortedKeys(required)
   end
   function gate:clear()
@@ -173,6 +179,9 @@ function simulator.build(options)
     stepIndex = stepIndex + 1
     if stepIndex > #steps then
       state = "idle"
+      if options.disableOnIdle then
+        workAllowed = false
+      end
     else
       state = "paused-step"
     end
@@ -234,6 +243,8 @@ function simulator.build(options)
       loadedTier = loadedTier,
       stepIndex = stepIndex,
       storageReads = storageReads,
+      routeChanges = routeChanges,
+      workAllowed = workAllowed,
     }
   end
 

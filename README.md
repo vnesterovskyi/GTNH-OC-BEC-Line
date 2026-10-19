@@ -42,10 +42,12 @@ The design is fail-closed:
    shared storage contains its full condensate requirement.
 5. Every paused boundary verifies that storage still contains the recipe's
    unconsumed condensate before the IO Node resumes.
-6. The active nanite cell must return to its fixed chest slot before cleanup
+6. If buffered inputs stage a different recipe, the Maxwell Gate is
+   reprogrammed to that recipe's exact condensate set before resuming.
+7. The active nanite cell must return to its fixed chest slot before cleanup
    continues.
-7. The water barrier must be restored before the lock is released.
-8. Any timeout, invalid inventory, missing cell, transfer failure, unexpected
+8. The water barrier must be restored before the lock is released.
+9. Any timeout, invalid inventory, missing cell, transfer failure, unexpected
    IO state, or failed postcondition stops the daemon with the IO Node paused.
 
 An empty Maxwell Gate filter exposes every condensate. Never use an empty
@@ -496,6 +498,7 @@ The safe idle status is:
 
 ```text
 IO state: idle
+IO work allowed: true
 Gate filters: water
 Lock count: 0
 Nanites available: 0
@@ -954,6 +957,13 @@ keeping the IO Node paused with the current exact Gate filters. In both cases
 the lock is preserved and the wait is indefinite. The log lists the exact
 missing litres for each condensate. Supply the fluids and the cycle continues
 automatically.
+
+### IO Node is disabled while the controller reports completion
+
+The controller treats a disabled IO Node as a fault, even when the BEC-specific
+state has already fallen back to `idle`. This preserves the lock and pause
+instead of reporting a false successful completion. Inspect the IO Node
+shutdown reason before manually re-enabling it.
 
 ### Log briefly shows `crafting` before `[ROUTED]`
 

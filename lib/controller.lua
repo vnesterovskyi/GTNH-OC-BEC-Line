@@ -38,6 +38,7 @@ function controller.new(hardware, config, options)
     state = "NEW",
     observedActive = false,
     currentNaniteTier = nil,
+    currentCondensateSignature = nil,
   }, controller)
 end
 
@@ -116,6 +117,10 @@ function controller:reconcile()
   local state = self.hardware.io.getState()
   self:assertStateUsable(state)
   local lockCount = self.hardware.lock:count()
+
+  if not self.hardware.io.isWorkAllowed() and lockCount > 0 then
+    error("IO Node is disabled while a lock is present; preserving the batch")
+  end
 
   if activeStates[state] and lockCount == 0 then
     error("Active recipe has no lock item; preserving machine in paused state")
@@ -261,11 +266,25 @@ function controller:waitForCondensate(required, quietWhenReady)
   self.log("[CONDENSATE_READY] full recipe requirement is stored")
 end
 
-function controller:configureRecipe(recipe)
-  self:setState("ROUTED", "programming Maxwell Gate")
+local function condensateSignature(required)
+  return table.concat(util.sortedKeys(required or {}), "\0")
+end
+
+function controller:ensureRecipeRoute(required, detail)
+  local signature = condensateSignature(required)
+  if signature == self.currentCondensateSignature then
+    return
+  end
+
+  self:setState("ROUTED", detail or "programming Maxwell Gate")
   self:mutation("program exact condensate filters", function()
-    self.hardware.gate:setExact(recipe.condensate)
+    self.hardware.gate:setExact(required)
   end)
+  self.currentCondensateSignature = signature
+end
+
+function controller:configureRecipe(recipe)
+  self:ensureRecipeRoute(recipe.condensate, "programming Maxwell Gate")
 
   local desired = {
     minParallel = self.config.cycle.minParallel,
@@ -354,6 +373,9 @@ function controller:runRecipe(initialTier)
     self:assertStateUsable(state)
 
     if state == "idle" then
+      if not self.hardware.io.isWorkAllowed() then
+        error("IO Node disabled itself before successful recipe completion")
+      end
       local stableChecks = self.config.timing.completionStableChecks or 2
       util.requirePositiveInteger(stableChecks, "Completion stable checks")
       for _ = 2, stableChecks do
@@ -376,6 +398,13 @@ function controller:runRecipe(initialTier)
 
       local requiredCondensate = self.hardware.io.getRequiredCondensate()
       local consumedCondensate = self.hardware.io.getConsumedCondensate()
+      if requiredCondensate == nil or next(requiredCondensate) == nil then
+        error("Paused recipe does not report required condensate")
+      end
+      self:ensureRecipeRoute(
+        requiredCondensate,
+        "updating Maxwell Gate for current serial recipe"
+      )
       local remaining = remainingCondensate(
         requiredCondensate,
         consumedCondensate
@@ -421,6 +450,7 @@ function controller:cleanup()
 
   self:mutation("restore the Maxwell Gate water barrier", function()
     self.hardware.gate:clear()
+    self.currentCondensateSignature = nil
   end)
 
   self:mutation("release the AE2 lock item", function()
