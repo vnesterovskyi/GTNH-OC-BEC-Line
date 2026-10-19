@@ -218,21 +218,34 @@ local function describeMissingCondensate(missing)
   return util.join(parts, "; ")
 end
 
-local function hasConsumedCondensate(consumed)
-  for _, amount in pairs(consumed or {}) do
-    if amount > 0 then
-      return true
+local function remainingCondensate(required, consumed)
+  local remaining = {}
+  for name, amount in pairs(required or {}) do
+    local unconsumed = amount - ((consumed and consumed[name]) or 0)
+    if unconsumed > 0 then
+      remaining[name] = unconsumed
     end
   end
-  return false
+  return remaining
 end
 
-function controller:waitForCondensate(required)
+function controller:waitForCondensate(required, quietWhenReady)
+  local initialMissing = missingCondensate(
+    required,
+    self.hardware.storage:stored()
+  )
+  if quietWhenReady and next(initialMissing) == nil then
+    return
+  end
+
   local lastDetail = nil
+  local pending = initialMissing
   self:setState("WAITING_FOR_CONDENSATE", "checking shared storage")
 
   util.waitUntil(self.environment, function()
-    local missing = missingCondensate(required, self.hardware.storage:stored())
+    local missing = pending
+      or missingCondensate(required, self.hardware.storage:stored())
+    pending = nil
     if next(missing) == nil then
       return true
     end
@@ -363,10 +376,12 @@ function controller:runRecipe(initialTier)
 
       local requiredCondensate = self.hardware.io.getRequiredCondensate()
       local consumedCondensate = self.hardware.io.getConsumedCondensate()
-      if requiredCondensate ~= nil
-          and next(requiredCondensate) ~= nil
-          and not hasConsumedCondensate(consumedCondensate) then
-        self:waitForCondensate(requiredCondensate)
+      local remaining = remainingCondensate(
+        requiredCondensate,
+        consumedCondensate
+      )
+      if next(remaining) ~= nil then
+        self:waitForCondensate(remaining, true)
       end
 
       local requiredTier = self.hardware.io.getRequiredTier()

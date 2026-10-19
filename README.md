@@ -40,8 +40,8 @@ The design is fail-closed:
 3. Idle state uses `water` as a registered non-condensate blocking filter.
 4. A staged recipe remains paused with the Gate blocked and nanites home until
    shared storage contains its full condensate requirement.
-5. Buffered inputs that exceed IO Node parallelism are admitted one serial
-   recipe wave at a time; every fresh wave repeats the storage check.
+5. Every paused boundary verifies that storage still contains the recipe's
+   unconsumed condensate before the IO Node resumes.
 6. The active nanite cell must return to its fixed chest slot before cleanup
    continues.
 7. The water barrier must be restored before the lock is released.
@@ -948,10 +948,11 @@ long.
 This is a safe admission wait, not a fault. The IO Node has accepted and
 reported the recipe, but shared BEC storage does not yet contain its full
 condensate requirement. During initial admission, the controller keeps the Gate
-blocked with `water` and leaves nanites home. During a later serial wave, it
-keeps the IO Node paused with the current exact Gate filters. In both cases the
-lock is preserved and the wait is indefinite. The log lists the exact missing
-litres for each condensate. Supply the fluids and the cycle continues
+blocked with `water` and leaves nanites home. At later pauses, it subtracts
+already consumed condensate and checks only the remaining requirement while
+keeping the IO Node paused with the current exact Gate filters. In both cases
+the lock is preserved and the wait is indefinite. The log lists the exact
+missing litres for each condensate. Supply the fluids and the cycle continues
 automatically.
 
 ### Log briefly shows `crafting` before `[ROUTED]`

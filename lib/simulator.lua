@@ -57,6 +57,8 @@ function simulator.build(options)
   function ioNode.getConsumedCondensate()
     if state == "idle" then
       return nil
+    elseif options.consumedCondensateForStep then
+      return util.copy(options.consumedCondensateForStep(stepIndex))
     elseif freshRecipeSteps[stepIndex] then
       return {}
     end
