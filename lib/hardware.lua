@@ -637,6 +637,9 @@ local function buildEnvironment(config)
     naniteTransferTimeoutSeconds = config.timing.naniteTransferTimeoutSeconds,
     now = computer.uptime,
     sleep = os.sleep,
+    afterObservation = function()
+      os.sleep(0)
+    end,
   }
 end
 

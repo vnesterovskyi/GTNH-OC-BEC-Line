@@ -782,7 +782,8 @@ controller minimizes them by:
 - using a lightweight nanite availability check at recipe boundaries;
 - caching verified parallel and speed settings across daemon batches;
 - writing the recovery journal only at recovery-critical transitions;
-- avoiding extra polling sleeps after synchronized observations.
+- using an explicit zero-delay cooperative yield after direct polling
+  observations, avoiding both watchdog failures and fixed polling sleeps.
 
 Cell loading and unloading still validate inventory location, nanite count, and
 the reported tier. Recovery never trusts an in-memory cache from a previous
