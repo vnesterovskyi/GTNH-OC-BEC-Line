@@ -87,9 +87,10 @@ end
 local Gate = {}
 Gate.__index = Gate
 
-function Gate.new(proxy, config)
+function Gate.new(proxy, config, environment)
   return setmetatable({
     proxy = proxy,
+    environment = environment,
     blockingFluid = config and config.blockingFluid or "water",
     cachedFilterCount = nil,
   }, Gate)
@@ -139,8 +140,19 @@ local function condensateNames(required)
   return names
 end
 
-function Gate:setExact(required)
-  local names = condensateNames(required)
+local function sameNames(left, right)
+  if #left ~= #right then
+    return false
+  end
+  for index, name in ipairs(left) do
+    if right[index] ~= name then
+      return false
+    end
+  end
+  return true
+end
+
+function Gate:applyNames(names, description)
   local count = self:filterCount()
   if #names > count then
     error("Recipe requires " .. #names .. " condensates but Maxwell Gate has " .. count .. " slots")
@@ -152,23 +164,25 @@ function Gate:setExact(required)
   end
   self.proxy.setCondensateFilters(filters)
 
-  local actual = self:names()
-  if #actual ~= #names then
-    error("Maxwell Gate filter count mismatch; expected " .. #names .. ", got " .. #actual)
-  end
-  for index, name in ipairs(names) do
-    if actual[index] ~= name then
-      error("Maxwell Gate filter mismatch; expected " .. util.join(names) .. ", got " .. util.join(actual))
+  local actual = {}
+  for _ = 1, self.environment.gateApplyChecks do
+    self.environment.afterObservation()
+    actual = self:names()
+    if sameNames(names, actual) then
+      return
     end
   end
+
+  error((description or "Maxwell Gate filters") .. " did not apply; expected "
+    .. util.join(names) .. ", got " .. util.join(actual))
+end
+
+function Gate:setExact(required)
+  self:applyNames(condensateNames(required), "Maxwell Gate recipe filters")
 end
 
 function Gate:clear()
-  self.proxy.setCondensateFilters({[1] = self.blockingFluid})
-  local names = self:names()
-  if #names ~= 1 or names[1] ~= self.blockingFluid then
-    error("Maxwell Gate blocking filter did not apply")
-  end
+  self:applyNames({self.blockingFluid}, "Maxwell Gate blocking filter")
 end
 
 function Gate:isBlocked()
@@ -635,6 +649,10 @@ local function buildEnvironment(config)
   local computer = require("computer")
   return {
     naniteTransferTimeoutSeconds = config.timing.naniteTransferTimeoutSeconds,
+    gateApplyChecks = util.requirePositiveInteger(
+      config.timing.gateApplyChecks or 40,
+      "Gate apply checks"
+    ),
     now = computer.uptime,
     sleep = os.sleep,
     afterObservation = function()
@@ -687,7 +705,7 @@ function hardware.build(config)
     environment = environment,
     metadata = metadata,
     io = ioNode,
-    gate = Gate.new(gateProxy, config.gateControl),
+    gate = Gate.new(gateProxy, config.gateControl, environment),
     storage = Storage.new(storageProxy),
     pause = PauseControl.new(redstone, ioNode, config.ioControl),
     lock = Lock.new(lockTransposer, config.lock, environment),

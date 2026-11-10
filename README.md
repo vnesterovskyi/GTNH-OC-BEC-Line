@@ -321,6 +321,7 @@ return {
   timing = {
     stagingTimeoutSeconds = 120,
     naniteTransferTimeoutSeconds = 60,
+    gateApplyChecks = 40,
     completionStableChecks = 2,
   },
 
@@ -403,6 +404,7 @@ return {
 |---|---|
 | `timing.stagingTimeoutSeconds` | Maximum game-time wait for a lock or staged paused recipe in one-shot mode. |
 | `timing.naniteTransferTimeoutSeconds` | Maximum game-time wait for the IO Node's available nanite count to reach the expected value. |
+| `timing.gateApplyChecks` | Maximum cooperative yields while waiting for a deferred Maxwell Gate filter write to become visible. |
 | `timing.completionStableChecks` | Consecutive synchronized `idle` observations required before cleanup. |
 | `cycle.naniteCount` | Minimum nanites that must become available after loading a cell. |
 | `cycle.minParallel` | IO Node minimum parallel setting. |
@@ -784,6 +786,8 @@ controller minimizes them by:
 - writing the recovery journal only at recovery-critical transitions;
 - using an explicit zero-delay cooperative yield after direct polling
   observations, avoiding both watchdog failures and fixed polling sleeps.
+- confirming deferred Maxwell Gate writes after the next server tick before
+  routing or cleanup continues.
 
 Cell loading and unloading still validate inventory location, nanite count, and
 the reported tier. Recovery never trusts an in-memory cache from a previous

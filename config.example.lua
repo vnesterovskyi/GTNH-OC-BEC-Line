@@ -4,6 +4,7 @@ return {
   timing = {
     stagingTimeoutSeconds = 120,
     naniteTransferTimeoutSeconds = 60,
+    gateApplyChecks = 40,
     completionStableChecks = 2,
   },
 
